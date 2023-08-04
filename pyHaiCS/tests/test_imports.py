@@ -15,6 +15,10 @@ class TestImports(unittest.TestCase):
         with self.assertRaises(AttributeError):
             # If __init__ hierarchy is correct this should not be possible
             hcs.hmc 
+        with self.assertRaises(AttributeError):
+            hcs.utils.standard_monte_carlo
+        with self.assertRaises(AttributeError):
+            hcs.estimators.standard_monte_carlo
 
 if __name__ == '__main__':
     unittest.main()
