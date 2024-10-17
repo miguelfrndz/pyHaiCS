@@ -18,7 +18,7 @@ The following samplers have been implemented in `pyHaiCS`:
 - Adaptive Importance Sampling (AIS)
 - Inverse Transform Sampling
 ### Basic Markov Chain Monte Carlo Samplers
-- Metropolis-Hastings Sampling
+- (Random-Walk) Metropolis-Hastings Sampling
 - Gibbs Sampling
 - Metropolis-Adjusted Langevin Sampling
 - Slice Sampling
@@ -26,6 +26,7 @@ The following samplers have been implemented in `pyHaiCS`:
 ### Hamiltonian Markov Chain Monte Carlo Samplers
 - Hamiltonian Monte Carlo (HMC) Sampling
 - Generalized Hamiltonian Monte Carlo (GHMC) Sampling
+- Molecular Dynamics Monte-Carlo (MDMC) Sampling
 - Generalized Shadow Hamiltonian Monte Carlo (GSHMC) Sampling
 - Mix & Match Hamiltonian Monte Carlo (MMHMC) Sampling
 
