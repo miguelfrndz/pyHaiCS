@@ -1,5 +1,5 @@
 <div align=center>
-    <img src="docs/source/static/logo.png" alt="pyHaiCS Logo" height="250px">
+    <img src="docs/source/static/logo.png" alt="pyHaiCS Logo" height="150px">
 </div>
 
 # pyHaiCS - Hamiltonian-based Monte-Carlo for Computational Statistics (HaiCS) in Python
