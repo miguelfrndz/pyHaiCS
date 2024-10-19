@@ -1,4 +1,7 @@
+![pyHaiCS Logo](docs/logo.png)
+
 # pyHaiCS
+
 ```
     ┓┏  •┏┓┏┓
 ┏┓┓┏┣┫┏┓┓┃ ┗┓
