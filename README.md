@@ -1,14 +1,8 @@
-![pyHaiCS Logo](docs/logo.png)
+<div align=center>
+    <img src="docs/source/static/logo.png" alt="pyHaiCS Logo" height="250px">
+</div>
 
-# pyHaiCS
-
-```
-    ┓┏  •┏┓┏┓
-┏┓┓┏┣┫┏┓┓┃ ┗┓
-┣┛┗┫┛┗┗┻┗┗┛┗┛
-┛  ┛         
-```
-Python Library for Hamiltonian Markov Chain Monte Carlo in Computational Statistics (HaiCS).
+# pyHaiCS - Hamiltonian-based Monte-Carlo for Computational Statistics (HaiCS) in Python
 
 ## Implemented Samplers
 The following samplers have been implemented in `pyHaiCS`:
