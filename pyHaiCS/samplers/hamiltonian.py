@@ -1,11 +1,8 @@
-def hmc():
+def HMC(n_samples, step_size, n_steps, potential_grad, mass_matrix, integrator):
     pass
 
-def ghmc():
+def GHMC():
     pass
 
-def gshmc():
-    pass
-
-def mmhmc():
+def MMHMC():
     pass
