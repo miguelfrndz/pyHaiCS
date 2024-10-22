@@ -72,12 +72,6 @@ mean_vector = jnp.zeros(X_train.shape[1])
 cov_mat = jnp.eye(X_train.shape[1])
 params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 
-# TODO 1: Implement Multi-Chain sampling (parallelizable!!!)
-# TODO 2: Make integrators JIT-Compilable (Maybe using PyTrees or Partially-Static Compiling)
-# TODO 3: Implement More Integrators
-# TODO 4: Implement More Samplers
-# TODO 5: Implement Adaptive Methods
-
 # HMC for posterior sampling
 params_samples = haics.samplers.hamiltonian.HMC(params, potential_args = (X_train, y_train),                                           
                             n_samples=1000, burn_in=200, 
