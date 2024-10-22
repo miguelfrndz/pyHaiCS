@@ -92,4 +92,32 @@ mean_preds = mean_preds > 0.5
 
 # Evaluate the model
 accuracy = jnp.mean(mean_preds == y_test)
-print(f"Accuracy: {accuracy}")
+print(f"Accuracy (w/ HMC Sampling): {accuracy}\n")
+
+########################### GHMC ###########################
+
+# Momentum noise is randomly chosen between 0 and 1 (0 not included)
+momentum_noise = jax.random.uniform(key, minval = 0.01, maxval = 1.0)
+
+# GHMC for posterior sampling
+params_samples = haics.samplers.hamiltonian.GHMC(params, 
+                            potential_args = (X_train, y_train),                                           
+                            n_samples = 1000, burn_in = 200, 
+                            step_size = 1e-3, n_steps = 100, 
+                            potential = neg_log_posterior_fn,  
+                            mass_matrix = jnp.eye(X_train.shape[1]), 
+                            momentum_noise = momentum_noise,
+                            integrator = haics.integrators.VerletIntegrator(), 
+                            RNG_key = 120)
+
+# Average across chains
+params_samples = jnp.mean(params_samples, axis = 0)
+
+# Make predictions using the samples
+preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+mean_preds = jnp.mean(preds, axis=0)
+mean_preds = mean_preds > 0.5
+
+# Evaluate the model
+accuracy = jnp.mean(mean_preds == y_test)
+print(f"Accuracy (w/ GHMC Sampling): {accuracy}\n")
