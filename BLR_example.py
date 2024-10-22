@@ -73,12 +73,17 @@ cov_mat = jnp.eye(X_train.shape[1])
 params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 
 # HMC for posterior sampling
-params_samples = haics.samplers.hamiltonian.HMC(params, potential_args = (X_train, y_train),                                           
-                            n_samples=1000, burn_in=200, 
-                            step_size=1e-3, n_steps=100, 
-                            potential=neg_log_posterior_fn,  
-                            mass_matrix=jnp.eye(X_train.shape[1]), 
-                            integrator=haics.integrators.VerletIntegrator(), RNG_key = 120)
+params_samples = haics.samplers.hamiltonian.HMC(params, 
+                            potential_args = (X_train, y_train),                                           
+                            n_samples = 1000, burn_in = 200, 
+                            step_size = 1e-3, n_steps = 100, 
+                            potential = neg_log_posterior_fn,  
+                            mass_matrix = jnp.eye(X_train.shape[1]), 
+                            integrator = haics.integrators.VerletIntegrator(), 
+                            RNG_key = 120)
+
+# Average across chains
+params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
 preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
