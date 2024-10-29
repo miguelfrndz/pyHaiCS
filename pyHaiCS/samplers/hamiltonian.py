@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from tqdm import tqdm
+from ..integrators import VerletIntegrator
 
 @jax.jit
 def Kinetic(p, mass_matrix):
@@ -72,7 +73,7 @@ def _single_chain_HMC(x_init, n_samples, burn_in, step_size, n_steps,
     return samples
 
 def HMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps, 
-        potential, mass_matrix, integrator, n_chains = 4, RNG_key = 42):
+        potential, mass_matrix, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
     """
     Multi-Chain Hamiltonian Monte-Carlo (HMC) sampler.
     -------------------------
@@ -151,7 +152,7 @@ def _single_chain_GHMC(x_init, n_samples, burn_in, step_size, n_steps,
     return samples
 
 def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps, 
-        potential, mass_matrix, momentum_noise, integrator, n_chains = 4, RNG_key = 42):
+        potential, mass_matrix, momentum_noise, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
     """
     Multi-Chain Generalized Hamiltonian Monte-Carlo (GHMC) sampler.
     -------------------------
