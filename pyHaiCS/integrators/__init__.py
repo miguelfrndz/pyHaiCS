@@ -1,2 +1,1 @@
-from .integrator import *
-from .verlet import *
+from .integrators import *

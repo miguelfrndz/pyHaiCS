@@ -13,5 +13,8 @@ cd pyHaiCS/tests # CD into test directory
 echo -e "${BIBlue}Running Import & Namespace Tests...${Color_Off}"
 python -m unittest -v test_imports.py
 
+echo -e "${BIBlue}Running Integrator Tests...${Color_Off}"
+python -m unittest -v test_integrators.py
+
 echo -e "${BIBlue}\nFinished Running All Tests!${Color_Off}\n"
 exit 0
