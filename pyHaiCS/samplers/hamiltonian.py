@@ -197,7 +197,7 @@ def MMHMC():
 
 
 def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps, 
-        potential, potential_grad, mass_matrix, integrator, key):
+        potential, potential_grad, potential_hessian, mass_matrix, integrator, key):
     """
     Single-Chain Hamiltonian Monte-Carlo (HMC) sampler (for s-AIA).
     -------------------------
@@ -217,7 +217,6 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
     samples = []
     frequencies = []
     acceptances = 0
-    hessian_jit = jax.jit(jax.hessian(potential))
     x = x_init
     for n in range(n_samples + burn_in):
         key, subkey = jax.random.split(key)
@@ -235,7 +234,7 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
             samples.append(x)
             acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand=None)
             # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
-            Hessian = hessian_jit(x)
+            Hessian = potential_hessian(x)
             # FIXME: Something is going wrong here (eigenvalues are not being computed correctly)
             freqs_iter = jnp.sqrt(jnp.linalg.eigvals(Hessian))
             frequencies.append(freqs_iter)
@@ -243,13 +242,13 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
     return samples, acceptances, frequencies
 
 def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, sensibility,
-                              target_AR, potential, potential_grad, mass_matrix,
+                              target_AR, potential, potential_grad, potential_hessian, mass_matrix,
                               delta_step, integrator, key):
     tuned_step_size, N, N_tot = step_size, 0, 0
     while N_tot + n_samples_check < n_samples_tune:
         samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_check, burn_in = 0, step_size = tuned_step_size, 
                                          n_steps = n_steps, potential = potential, potential_grad = potential_grad,
-                                         mass_matrix = mass_matrix, integrator = integrator, key = key)
+                                         potential_hessian = potential_hessian, mass_matrix = mass_matrix, integrator = integrator, key = key)
         N += n_samples_check
         AR = N_acc / N
         if AR < target_AR - sensibility:
@@ -261,10 +260,13 @@ def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, se
         N_tot += n_samples_check
     return tuned_step_size
 
-def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_size, n_steps, stage, potential, potential_grad, mass_matrix, integrator, key):
+def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_size, 
+                 n_steps, stage, potential, potential_grad, potential_hessian, 
+                 mass_matrix, integrator, key):
     samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size,
-                                n_steps = n_steps, potential = potential, potential_grad = potential_grad,
-                                mass_matrix = mass_matrix, integrator = integrator, key = key)
+                                n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
+                                potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
+                                integrator = integrator, key = key)
     frequencies = jnp.mean(frequencies, axis = 0)
     max_freq = jnp.max(frequencies)
     AR = N_acc / n_samples_burn_in
@@ -331,8 +333,11 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print(f"{'Sampler':^30}|{sampler:^30}")
     # TODO: Print other s-AIA parameters
     print("="*61)
+    # FIXME: Check hessian computation (two versions below)
+    potential_hessian = jax.tree_util.Partial(jax.hessian(potential), *potential_args)
     potential = jax.tree_util.Partial(potential, *potential_args)
     potential_grad = jax.grad(potential)
+    # potential_hessian = jax.hessian(potential)
     # Step 1: Tuning Stage
     print("1) Tuning Stage...")
     n_samples, step_size, n_steps, integrator = n_samples_tune, 1/x_init.shape[0], 1, VerletIntegrator()
@@ -340,8 +345,8 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print(f"\t- Dimension of Data: {x_init.shape[0]}")
     print(f"\t- Initial Step-Size: {step_size}")
     tuned_step_size = _sAIA_Tuning(x_init, n_samples, n_samples_check, step_size, n_steps, 
-                                   sensibility, target_AR, potential, potential_grad, mass_matrix, 
-                                   delta_step, integrator, jax.random.PRNGKey(RNG_key))
+                                   sensibility, target_AR, potential, potential_grad, potential_hessian,
+                                   mass_matrix, delta_step, integrator, jax.random.PRNGKey(RNG_key))
     print(f"\t- Tuned Step-Size: {tuned_step_size}")
     print("="*61)
     # Step 2: Burn-In Stage
@@ -349,8 +354,8 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     n_samples, step_size = n_samples_burn_in, tuned_step_size
     print(f"\t- Number of Burn-In Samples: {n_samples}")
     dimensionless_step_sizes, step_sizes = _sAIA_BurnIn(x_init, n_samples, n_samples_prod, compute_freqs, step_size, n_steps, 
-                                                        stage, potential, potential_grad, mass_matrix, integrator, 
-                                                        jax.random.PRNGKey(RNG_key))
+                                                        stage, potential, potential_grad, potential_hessian, mass_matrix, 
+                                                        integrator, jax.random.PRNGKey(RNG_key))
     print(f"\t- Dimensionless Step-Sizes: {dimensionless_step_sizes}")
     print(f"\t- Step-Sizes: {step_sizes}")
     print("="*61)
