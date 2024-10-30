@@ -73,26 +73,44 @@ cov_mat = jnp.eye(X_train.shape[1])
 params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 
 # HMC for posterior sampling
-params_samples = haics.samplers.hamiltonian.HMC(params, 
-                            potential_args = (X_train, y_train),                                           
-                            n_samples = 1000, burn_in = 200, 
-                            step_size = 1e-3, n_steps = 100, 
-                            potential = neg_log_posterior_fn,  
-                            mass_matrix = jnp.eye(X_train.shape[1]), 
-                            integrator = haics.integrators.VerletIntegrator(), 
-                            RNG_key = 120)
+# params_samples = haics.samplers.hamiltonian.HMC(params, 
+#                             potential_args = (X_train, y_train),                                           
+#                             n_samples = 1000, burn_in = 200, 
+#                             step_size = 1e-3, n_steps = 100, 
+#                             potential = neg_log_posterior_fn,  
+#                             mass_matrix = jnp.eye(X_train.shape[1]), 
+#                             integrator = haics.integrators.VerletIntegrator(), 
+#                             RNG_key = 120)
 
-# Average across chains
-params_samples = jnp.mean(params_samples, axis = 0)
+# # Average across chains
+# params_samples = jnp.mean(params_samples, axis = 0)
 
-# Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
-mean_preds = jnp.mean(preds, axis=0)
-mean_preds = mean_preds > 0.5
+# # Make predictions using the samples
+# preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+# mean_preds = jnp.mean(preds, axis=0)
+# mean_preds = mean_preds > 0.5
 
-# Evaluate the model
-accuracy = jnp.mean(mean_preds == y_test)
-print(f"Accuracy (w/ HMC Sampling): {accuracy}\n")
+# # Evaluate the model
+# accuracy = jnp.mean(mean_preds == y_test)
+# print(f"Accuracy (w/ HMC Sampling): {accuracy}\n")
+
+##################### HMC w/s-AIA Adaptive Scheme #####################
+
+# HMC w/s-AIA for posterior sampling
+haics.samplers.hamiltonian.sAIA(params,
+                            potential_args = (X_train, y_train),
+                            n_samples_tune = 1000, 
+                            n_samples_check = 200,
+                            n_samples_burn_in = 2000,
+                            n_samples_prod = 3000,
+                            potential = neg_log_posterior_fn,
+                            mass_matrix = jnp.eye(X_train.shape[1]),
+                            target_AR = 0.92, stage = 2, 
+                            sensibility = 0.01, delta_step = 0.01, 
+                            compute_freqs = True, sampler = "HMC", RNG_key = 42)
+
+import sys; sys.exit()
+
 
 ########################### GHMC ###########################
 

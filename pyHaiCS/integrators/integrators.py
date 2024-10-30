@@ -103,7 +103,9 @@ class MultiStageSplittingIntegrator(Integrator):
         p (jax.Array): updated momentum
         """
         # TODO: Implement General Form of Multi-Stage Splitting Integrator
-        raise NotImplementedError("Generalized integrator not implemented. Please use either MSSI_2, MSSI_3 or any of the specific instances of these methods implemented.")
+        raise NotImplementedError("Generalized integrator not implemented. \
+                                  Please use either MSSI_2, MSSI_3 or any of the \
+                                  specific instances of these methods implemented.")
         pass
 
 class MSSI_2(MultiStageSplittingIntegrator):
