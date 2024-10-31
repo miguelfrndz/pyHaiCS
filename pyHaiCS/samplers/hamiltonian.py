@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
-from ..integrators import VerletIntegrator
+from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3
 
 @jax.jit
 def Kinetic(p, mass_matrix):
@@ -104,8 +104,8 @@ def HMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
     print("="*61)
     keys = jax.random.split(jax.random.PRNGKey(RNG_key), n_chains)
     x_init_repeated = jnp.repeat(x_init[None, :], n_chains, axis = 0)
-    potential = jax.tree_util.Partial(potential, *potential_args)
-    potential_grad = jax.grad(potential)
+    potential = jax.jit(jax.tree_util.Partial(potential, *potential_args))
+    potential_grad = jax.jit(jax.grad(potential))
     vectorized_chain = jax.vmap(_single_chain_HMC, in_axes=(0, None, None, None, None, None, None, None, None, 0))
     samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, n_steps, potential, potential_grad, mass_matrix, integrator, keys)
     return samples
@@ -235,7 +235,6 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
             acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand=None)
             # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
             Hessian = potential_hessian(x)
-            # FIXME: Something is going wrong here (eigenvalues are not being computed correctly)
             freqs_iter = jnp.sqrt(jnp.linalg.eigvals(Hessian))
             frequencies.append(freqs_iter)
     samples, frequencies = jnp.stack(samples, axis = 0), jnp.stack(frequencies, axis = 0)
@@ -268,6 +267,8 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
                                 potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
                                 integrator = integrator, key = key)
     frequencies = jnp.mean(frequencies, axis = 0)
+    # Handle complex frequencies by taking the absolute value
+    frequencies = jnp.abs(frequencies)
     max_freq = jnp.max(frequencies)
     AR = N_acc / n_samples_burn_in
     dimensionless_step_sizes, step_sizes = None, None
@@ -302,6 +303,42 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
                                                     operand = None)
     return dimensionless_step_sizes, step_sizes
 
+def _rho_2(step_size, b):
+    numerator = step_size**4 * (2 * b**2 * (1/2 - b) * step_size**2 + 4 * b**2 - 6 * b + 1)**2
+    denominator = 8 * (2 - b * step_size**2) * (2 - (1/2 - b) * step_size**2) * (1 - b * (1/2 - b) * step_size**2)
+    return numerator / denominator
+
+def _rho_3(step_size, b):
+    numerator = step_size**4 * (-3 * b**4 + 8 * b**3 - 19/4 * b**2 + b + b**2 * step_size**2 * (b**3 - 5/4 * b**2 + b/2 - 1/16) - 1/16)**2
+    denominator = 2 * (3 * b - b * step_size**2 * (b - 1/4) - 1) * (1 - 3 * b - b * step_size**2 * (b - 1/2)**2) * (-9 * b**2 + 6 * b - step_size**2 * (b**3 - 5/4 * b**2 + b/2 - 1/16) - 1)
+    return numerator / denominator
+
+def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 20):
+    rho, b_MEk, b_VVk = None, None, None
+    if stage == 2:
+        rho = _rho_2
+        b_MEk = ME_2().b
+        b_VVk = VV_2().b
+    elif stage == 3:
+        rho = _rho_3
+        b_MEk = ME_3().b
+        b_VVk = VV_3().b
+    else:
+        raise NotImplementedError("Only 2- & 3-stage integrators are supported as of now.")
+    optimal_coeffs = []
+    # Sample b values between b_MEk and b_VVk
+    for i in range(dimensionless_step_sizes.shape[0]):
+        b_values = jax.random.uniform(jax.random.PRNGKey(key), shape = (n_coeff_samples, )) * (b_VVk - b_MEk) + b_MEk
+        step_sizes = jax.random.uniform(jax.random.PRNGKey(key), shape = (n_coeff_samples, )) * dimensionless_step_sizes[i]
+        max_rho = []
+        for b in b_values:
+            rho_vals = jax.vmap(rho, in_axes = (0, None))(step_sizes, b)
+            max_rho.append(jnp.max(rho_vals))
+        optimal_b = b_values[jnp.argmin(max_rho)]
+        optimal_coeffs.append(optimal_b)
+    optimal_coeffs = jnp.array(optimal_coeffs)
+    return optimal_coeffs
+
 def sAIA(x_init, potential_args, n_samples_tune, n_samples_check, 
          n_samples_burn_in, n_samples_prod, potential, mass_matrix, 
          target_AR = 0.92, stage = 2, sensibility = 0.01, 
@@ -334,10 +371,9 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     # TODO: Print other s-AIA parameters
     print("="*61)
     # FIXME: Check hessian computation (two versions below)
-    potential_hessian = jax.tree_util.Partial(jax.hessian(potential), *potential_args)
-    potential = jax.tree_util.Partial(potential, *potential_args)
-    potential_grad = jax.grad(potential)
-    # potential_hessian = jax.hessian(potential)
+    potential = jax.jit(jax.tree_util.Partial(potential, *potential_args))
+    potential_grad = jax.jit(jax.grad(potential))
+    potential_hessian = jax.jit(jax.hessian(potential))
     # Step 1: Tuning Stage
     print("1) Tuning Stage...")
     n_samples, step_size, n_steps, integrator = n_samples_tune, 1/x_init.shape[0], 1, VerletIntegrator()
@@ -358,5 +394,8 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
                                                         integrator, jax.random.PRNGKey(RNG_key))
     print(f"\t- Dimensionless Step-Sizes: {dimensionless_step_sizes}")
     print(f"\t- Step-Sizes: {step_sizes}")
+    opt_integration_coeffs = _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, RNG_key)
+    print(f"\t- Optimal Integration Coefficients: {opt_integration_coeffs}")
+    print(opt_integration_coeffs.shape)
     print("="*61)
     # TODO: Continue here
