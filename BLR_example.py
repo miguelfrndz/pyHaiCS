@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 
 # Bayesian Logistic Regression model (in JAX)
 @jax.jit
-def model_fn(params, x):
+def model_fn(x, params):
     return jax.nn.sigmoid(jnp.matmul(x, params))
 
 @jax.jit
@@ -21,32 +21,32 @@ def log_prior_fn(params):
     return jnp.sum(jax.scipy.stats.norm.logpdf(params))
 
 @jax.jit
-def likelihood_fn(params, x, y):
-    preds = model_fn(params, x)
+def likelihood_fn(x, y, params):
+    preds = model_fn(x, params)
     return jnp.prod(preds ** y * (1 - preds) ** (1 - y))
 
 @jax.jit
-def log_likelihood_fn(params, x, y):
+def log_likelihood_fn(x, y, params):
     epsilon = 1e-7
-    preds = model_fn(params, x)
+    preds = model_fn(x, params)
     return jnp.sum(y * jnp.log(preds + epsilon) + (1 - y) * jnp.log(1 - preds + epsilon))
 
 @jax.jit
-def posterior_fn(params, x, y):
-    return prior_fn(params) * likelihood_fn(params, x, y)
+def posterior_fn(x, y, params):
+    return prior_fn(params) * likelihood_fn(x, y, params)
 
 @jax.jit
-def log_posterior_fn(params, x, y):
-    return log_prior_fn(params) + log_likelihood_fn(params, x, y)
+def log_posterior_fn(x, y, params):
+    return log_prior_fn(params) + log_likelihood_fn(x, y, params)
 
 @jax.jit
-def neg_posterior_fn(params, x, y):
-    return -posterior_fn(params, x, y)
+def neg_posterior_fn(x, y, params):
+    return -posterior_fn(x, y, params)
 
 # Define a wrapper function to negate the log posterior
 @jax.jit
-def neg_log_posterior_fn(params, x, y):
-    return -log_posterior_fn(params, x, y)
+def neg_log_posterior_fn(x, y, params):
+    return -log_posterior_fn(x, y, params)
 
 print(f"Running pyHaiCS v.{haics.__version__}")
 
@@ -86,7 +86,7 @@ params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 # params_samples = jnp.mean(params_samples, axis = 0)
 
 # # Make predictions using the samples
-# preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+# preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 # mean_preds = jnp.mean(preds, axis=0)
 # mean_preds = mean_preds > 0.5
 
@@ -132,7 +132,7 @@ params_samples = haics.samplers.hamiltonian.GHMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
@@ -156,7 +156,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
@@ -180,7 +180,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
@@ -204,7 +204,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
@@ -228,7 +228,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
@@ -252,7 +252,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
@@ -276,7 +276,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
-preds = jax.vmap(lambda params: model_fn(params, X_test))(params_samples)
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
 mean_preds = jnp.mean(preds, axis=0)
 mean_preds = mean_preds > 0.5
 
