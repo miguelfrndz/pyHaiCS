@@ -303,11 +303,13 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
                                                     operand = None)
     return dimensionless_step_sizes, step_sizes
 
+@jax.jit
 def _rho_2(step_size, b):
     numerator = step_size**4 * (2 * b**2 * (1/2 - b) * step_size**2 + 4 * b**2 - 6 * b + 1)**2
     denominator = 8 * (2 - b * step_size**2) * (2 - (1/2 - b) * step_size**2) * (1 - b * (1/2 - b) * step_size**2)
     return numerator / denominator
 
+@jax.jit
 def _rho_3(step_size, b):
     numerator = step_size**4 * (-3 * b**4 + 8 * b**3 - 19/4 * b**2 + b + b**2 * step_size**2 * (b**3 - 5/4 * b**2 + b/2 - 1/16) - 1/16)**2
     denominator = 2 * (3 * b - b * step_size**2 * (b - 1/4) - 1) * (1 - 3 * b - b * step_size**2 * (b - 1/2)**2) * (-9 * b**2 + 6 * b - step_size**2 * (b**3 - 5/4 * b**2 + b/2 - 1/16) - 1)
@@ -334,6 +336,7 @@ def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 
         for b in b_values:
             rho_vals = jax.vmap(rho, in_axes = (0, None))(step_sizes, b)
             max_rho.append(jnp.max(rho_vals))
+        max_rho = jnp.array(max_rho)
         optimal_b = b_values[jnp.argmin(max_rho)]
         optimal_coeffs.append(optimal_b)
     optimal_coeffs = jnp.array(optimal_coeffs)
@@ -396,6 +399,5 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print(f"\t- Step-Sizes: {step_sizes}")
     opt_integration_coeffs = _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, RNG_key)
     print(f"\t- Optimal Integration Coefficients: {opt_integration_coeffs}")
-    print(opt_integration_coeffs.shape)
     print("="*61)
-    # TODO: Continue here
+    # TODO: Continue here: Add Production Stage, Modify HMC to accept per step parameters & improve efficiency of parameter estimation
