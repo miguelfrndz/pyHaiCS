@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
-from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3
+from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3
 
 @jax.jit
 def Kinetic(p, mass_matrix):
@@ -197,23 +197,31 @@ def MMHMC():
 
 
 def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps, 
-        potential, potential_grad, potential_hessian, mass_matrix, integrator, key):
+    potential, potential_grad, potential_hessian, mass_matrix, integrator, key):
     """
     Single-Chain Hamiltonian Monte-Carlo (HMC) sampler (for s-AIA).
     -------------------------
     Parameters:
-        n_samples (int): number of samples
-        burn_in (int): burn-in samples
-        step_size (float): step size
-        n_steps (int): number of integration steps
-        potential (function): Hamiltonian potential
-        potential_grad (function): Hamiltonian potential gradient
-        mass_matrix (jax.Array): mass matrix
-        integrator (object): integrator object
+    n_samples (int): number of samples
+    burn_in (int): burn-in samples
+    step_size (float or list): step size(s)
+    n_steps (int or list): number of integration steps(s)
+    potential (function): Hamiltonian potential
+    potential_grad (function): Hamiltonian potential gradient
+    mass_matrix (jax.Array): mass matrix
+    integrator (object): integrator object
     -------------------------
     Returns:
-        samples (jax.Array): samples
+    samples (jax.Array): samples
     """
+    # Ensure step_size and n_steps are lists of the correct length
+    if isinstance(step_size, (int, float)):
+        step_size = [step_size] * n_samples
+    if isinstance(n_steps, int):
+        n_steps = [n_steps] * n_samples
+    assert len(step_size) == n_samples, "step_size must have length n_samples"
+    assert len(n_steps) == n_samples, "n_steps must have length n_samples"
+
     samples = []
     frequencies = []
     acceptances = 0
@@ -223,8 +231,10 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
         # Initial momentum (gaussian), shape given by mass matrix
         p = jax.random.multivariate_normal(subkey, jnp.zeros(x.shape[0]), mass_matrix)
         # Integrate Hamiltonian dynamics
-        x_prop, p_prop = integrator.integrate(x, p, potential_grad, n_steps, mass_matrix, step_size)
-        # Computer enery error
+        current_step_size = step_size[0] if n < burn_in else step_size[n]
+        current_n_steps = n_steps[0] if n < burn_in else n_steps[n]
+        x_prop, p_prop = integrator.integrate(x, p, potential_grad, current_n_steps, mass_matrix, current_step_size)
+        # Compute energy error
         delta_H = Hamiltonian(x_prop, p_prop, potential, mass_matrix) - Hamiltonian(x, p, potential, mass_matrix)
         # Metropolis-Hastings acceptance
         accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
@@ -401,3 +411,19 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print(f"\t- Optimal Integration Coefficients: {opt_integration_coeffs}")
     print("="*61)
     # TODO: Continue here: Add Production Stage, Modify HMC to accept per step parameters & improve efficiency of parameter estimation
+    # Step 3: Production Stage
+    print("3) Production Stage...")
+    n_steps = jax.random.randint(jax.random.PRNGKey(RNG_key), shape=(n_samples_prod,), minval=1, maxval=2 * (x_init.shape[0] / step_sizes) - 1)
+    print(f"\t- Number of Steps: {n_steps}")
+    # TODO FIXME: Use the s-AIA integrator with the obtained coefficients opt_integration_coeffs
+    # if stage == 2:
+    #     integrator = MSSI_2(opt_integration_coeffs)
+    # elif stage == 3:
+    #     integrator = ME_3(opt_integration_coeffs)
+    samples, _, _ = _sAIA_HMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
+                              n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
+                              potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
+                              integrator = integrator, key = jax.random.PRNGKey(RNG_key))
+    
+    print("="*61)
+    return samples
