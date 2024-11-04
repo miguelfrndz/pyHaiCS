@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
-from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3
+from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator
 
 @jax.jit
 def Kinetic(p, mass_matrix):
@@ -219,8 +219,11 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
         step_size = [step_size] * n_samples
     if isinstance(n_steps, int):
         n_steps = [n_steps] * n_samples
+    if isinstance(integrator, Integrator):
+        integrator = [integrator] * n_samples
     assert len(step_size) == n_samples, "step_size must have length n_samples"
     assert len(n_steps) == n_samples, "n_steps must have length n_samples"
+    assert len(integrator) == n_samples, "integrator must have length n_samples"
 
     samples = []
     frequencies = []
@@ -233,16 +236,17 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
         # Integrate Hamiltonian dynamics
         current_step_size = step_size[0] if n < burn_in else step_size[n]
         current_n_steps = n_steps[0] if n < burn_in else n_steps[n]
-        x_prop, p_prop = integrator.integrate(x, p, potential_grad, current_n_steps, mass_matrix, current_step_size)
+        current_integrator = integrator[0] if n < burn_in else integrator[n]
+        x_prop, p_prop = current_integrator.integrate(x, p, potential_grad, current_n_steps, mass_matrix, current_step_size)
         # Compute energy error
         delta_H = Hamiltonian(x_prop, p_prop, potential, mass_matrix) - Hamiltonian(x, p, potential, mass_matrix)
         # Metropolis-Hastings acceptance
         accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
         # If acceptance, add one to acceptances
-        x = jax.lax.cond(accept, lambda _: x_prop, lambda _: x, operand=None)
+        x = jax.lax.cond(accept, lambda _: x_prop, lambda _: x, operand = None)
         if n >= burn_in:
             samples.append(x)
-            acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand=None)
+            acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand = None)
             # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
             Hessian = potential_hessian(x)
             freqs_iter = jnp.sqrt(jnp.linalg.eigvals(Hessian))
@@ -410,20 +414,20 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     opt_integration_coeffs = _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, RNG_key)
     print(f"\t- Optimal Integration Coefficients: {opt_integration_coeffs}")
     print("="*61)
-    # TODO: Continue here: Add Production Stage, Modify HMC to accept per step parameters & improve efficiency of parameter estimation
     # Step 3: Production Stage
     print("3) Production Stage...")
     n_steps = jax.random.randint(jax.random.PRNGKey(RNG_key), shape=(n_samples_prod,), minval=1, maxval=2 * (x_init.shape[0] / step_sizes) - 1)
     print(f"\t- Number of Steps: {n_steps}")
-    # TODO FIXME: Use the s-AIA integrator with the obtained coefficients opt_integration_coeffs
-    # if stage == 2:
-    #     integrator = MSSI_2(opt_integration_coeffs)
-    # elif stage == 3:
-    #     integrator = ME_3(opt_integration_coeffs)
+    if stage == 2:
+        integrator = [MSSI_2(b) for b in opt_integration_coeffs]
+    elif stage == 3:
+        a_coeffs = [(1 + 2*b)/(2*(6*b-2)) for b in opt_integration_coeffs]
+        integrator = [MSSI_3(a, b) for a, b in zip(a_coeffs, opt_integration_coeffs)]
+    assert len(integrator) == n_samples_prod, "Number of integrators must be equal to number of samples"
+    # FIXME: Fix bug with provided number of integrators
     samples, _, _ = _sAIA_HMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
                               n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
                               potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
                               integrator = integrator, key = jax.random.PRNGKey(RNG_key))
-    
     print("="*61)
     return samples
