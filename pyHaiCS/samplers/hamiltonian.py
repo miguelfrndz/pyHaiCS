@@ -234,9 +234,9 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
         # Initial momentum (gaussian), shape given by mass matrix
         p = jax.random.multivariate_normal(subkey, jnp.zeros(x.shape[0]), mass_matrix)
         # Integrate Hamiltonian dynamics
-        current_step_size = step_size[0] if n < burn_in else step_size[n]
-        current_n_steps = n_steps[0] if n < burn_in else n_steps[n]
-        current_integrator = integrator[0] if n < burn_in else integrator[n]
+        current_step_size = step_size[min(n - burn_in, n_samples - 1)] if n >= burn_in else step_size[0]
+        current_n_steps = n_steps[min(n - burn_in, n_samples - 1)] if n >= burn_in else n_steps[0]
+        current_integrator = integrator[min(n - burn_in, n_samples - 1)] if n >= burn_in else integrator[0]
         x_prop, p_prop = current_integrator.integrate(x, p, potential_grad, current_n_steps, mass_matrix, current_step_size)
         # Compute energy error
         delta_H = Hamiltonian(x_prop, p_prop, potential, mass_matrix) - Hamiltonian(x, p, potential, mass_matrix)
