@@ -195,6 +195,21 @@ def MMHMC():
     # TODO: Implement MMHMC sampler
     raise NotImplementedError("MMHMC sampler not implemented yet!")
 
+@jax.jit
+def _compute_frequencies(Hessian):
+    """
+    Compute frequencies of a Hamiltonian system.
+    -------------------------
+    Parameters:
+        potential_hessian (function): Hessian of Hamiltonian potential
+        x (jax.Array): position
+    -------------------------
+    Returns:
+        freqs (jax.Array): frequencies
+    """
+    freqs = jnp.sqrt(jnp.linalg.eigvals(Hessian))
+    return freqs
+
 
 def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps, 
     potential, potential_grad, potential_hessian, mass_matrix, integrator, key):
@@ -249,7 +264,7 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
             acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand = None)
             # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
             Hessian = potential_hessian(x)
-            freqs_iter = jnp.sqrt(jnp.linalg.eigvals(Hessian))
+            freqs_iter = _compute_frequencies(Hessian)
             frequencies.append(freqs_iter)
     samples, frequencies = jnp.stack(samples, axis = 0), jnp.stack(frequencies, axis = 0)
     return samples, acceptances, frequencies
