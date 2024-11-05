@@ -212,7 +212,7 @@ def _compute_frequencies(Hessian):
 
 
 def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps, 
-    potential, potential_grad, potential_hessian, mass_matrix, integrator, key):
+    potential, potential_grad, potential_hessian, mass_matrix, integrator, key, phase_name):
     """
     Single-Chain Hamiltonian Monte-Carlo (HMC) sampler (for s-AIA).
     -------------------------
@@ -244,7 +244,7 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
     frequencies = []
     acceptances = 0
     x = x_init
-    for n in range(n_samples + burn_in):
+    for n in tqdm(range(n_samples + burn_in), desc = f"\t- Running {phase_name} Phase HMC", ncols = 100):
         key, subkey = jax.random.split(key)
         # Initial momentum (gaussian), shape given by mass matrix
         p = jax.random.multivariate_normal(subkey, jnp.zeros(x.shape[0]), mass_matrix)
@@ -276,7 +276,8 @@ def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, se
     while N_tot + n_samples_check < n_samples_tune:
         samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_check, burn_in = 0, step_size = tuned_step_size, 
                                          n_steps = n_steps, potential = potential, potential_grad = potential_grad,
-                                         potential_hessian = potential_hessian, mass_matrix = mass_matrix, integrator = integrator, key = key)
+                                         potential_hessian = potential_hessian, mass_matrix = mass_matrix, integrator = integrator, key = key,
+                                         phase_name = "Tuning")
         N += n_samples_check
         AR = N_acc / N
         if AR < target_AR - sensibility:
@@ -294,7 +295,7 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
     samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size,
                                 n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
                                 potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                                integrator = integrator, key = key)
+                                integrator = integrator, key = key, phase_name = "Burn-In")
     frequencies = jnp.mean(frequencies, axis = 0)
     # Handle complex frequencies by taking the absolute value
     frequencies = jnp.abs(frequencies)
@@ -400,6 +401,15 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print("Running s-AIA Adaptive Integration Scheme...")
     print("="*61)
     print(f"{'Sampler':^30}|{sampler:^30}")
+    print(f"{'Num. Samples Tune':^30}|{n_samples_tune:^30}")
+    print(f"{'Num. Samples Check':^30}|{n_samples_check:^30}")
+    print(f"{'Num. Samples Burn-In':^30}|{n_samples_burn_in:^30}")
+    print(f"{'Num. Samples Prod':^30}|{n_samples_prod:^30}")
+    print(f"{'Stage':^30}|{stage:^30}")
+    print(f"{'Target AR':^30}|{target_AR:^30}")
+    print(f"{'Sensibility':^30}|{sensibility:^30}")
+    print(f"{'Delta Step':^30}|{delta_step:^30}")
+    print(f"{'Compute Freqs':^30}|{('Yes' if compute_freqs else 'No'):^30}")
     # TODO: Print other s-AIA parameters
     print("="*61)
     # FIXME: Check hessian computation (two versions below)
@@ -439,10 +449,9 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
         a_coeffs = [(1 + 2*b)/(2*(6*b-2)) for b in opt_integration_coeffs]
         integrator = [MSSI_3(a, b) for a, b in zip(a_coeffs, opt_integration_coeffs)]
     assert len(integrator) == n_samples_prod, "Number of integrators must be equal to number of samples"
-    # FIXME: Fix bug with provided number of integrators
     samples, _, _ = _sAIA_HMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
                               n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
                               potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                              integrator = integrator, key = jax.random.PRNGKey(RNG_key))
+                              integrator = integrator, key = jax.random.PRNGKey(RNG_key), phase_name = "Production")
     print("="*61)
     return samples
