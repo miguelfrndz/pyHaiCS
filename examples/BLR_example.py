@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append('../')
+
 import pyHaiCS as haics
 
 import jax
