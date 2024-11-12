@@ -112,6 +112,9 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
                             integrator = haics.integrators.VerletIntegrator(), 
                             RNG_key = 120)
 
+print(f"Potential Scale Reduction Factor (PSRF): {haics.utils.metrics.PSRF(params_samples)}\n")
+print(f"Effective Sample Size (ESS-Geyer-IMSE): {haics.utils.metrics.geyerESS(params_samples, 'var_trunc')}\n")
+
 # Average across chains
 params_samples = jnp.mean(params_samples, axis = 0)
 
@@ -126,6 +129,9 @@ print(f"Accuracy (w/ HMC Sampling): {accuracy}\n")
 
 # Compare with baseline classifier (scikit-learn)
 baseline_classifier(X_train, y_train, X_test, y_test)
+
+import sys;
+sys.exit()
 
 ##################### HMC w/s-AIA Adaptive Scheme #####################
 

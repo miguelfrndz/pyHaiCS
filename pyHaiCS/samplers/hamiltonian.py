@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
 from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator
+from ..utils.metrics import acceptance_rate
 
 @jax.jit
 def Kinetic(p, mass_matrix):
@@ -279,7 +280,7 @@ def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, se
                                          potential_hessian = potential_hessian, mass_matrix = mass_matrix, integrator = integrator, key = key,
                                          phase_name = "Tuning")
         N += n_samples_check
-        AR = N_acc / N
+        AR = acceptance_rate(N_acc, n_samples_check)
         if AR < target_AR - sensibility:
             tuned_step_size -= delta_step
             N = 0
@@ -300,7 +301,7 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
     # Handle complex frequencies by taking the absolute value
     frequencies = jnp.abs(frequencies)
     max_freq = jnp.max(frequencies)
-    AR = N_acc / n_samples_burn_in
+    AR = acceptance_rate(N_acc, n_samples_burn_in)
     dimensionless_step_sizes, step_sizes = None, None
     if compute_freqs:
         S = jnp.max(jnp.array([1, 2/(max_freq * step_size) * jnp.power((2*jnp.pi*(1 - AR)**2)/x_init.shape[0], 1/6)]))
