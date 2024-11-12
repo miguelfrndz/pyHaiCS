@@ -33,9 +33,6 @@ def PSRF(samples):
     return jnp.sqrt((degs_of_freedom + 3) / (degs_of_freedom + 1) * variance_estimate / within_chain_variance)
 
 def _geyerESS_atomic(samples, thres_estimator, normalize):
-    """
-    Calculates the Geyer's Effective Sample Size (ESS) of a series of samples.
-    """
     if thres_estimator not in ['ISPE', 'IMSE', 'var_trunc', 'lag_trunc', 'sign_trunc']:
         raise ValueError(f"Unknown threshold estimator: {thres_estimator}")
     n_samples = samples.shape[0]
@@ -74,6 +71,9 @@ def _geyerESS_atomic(samples, thres_estimator, normalize):
     return ESS
 
 def geyerESS(samples, thres_estimator = 'IMSE', normalize = True):
+    """
+    Calculates the Geyer's Effective Sample Size (ESS) of a series of samples.
+    """
     # TODO: Currently uses Numpy instead of JAX. Implement JAX version with vectorized operations for chains/dimensions.
     samples = np.array(samples)
     print("Samples Shape for Geyer ESS:", samples.shape)
@@ -84,5 +84,18 @@ def geyerESS(samples, thres_estimator = 'IMSE', normalize = True):
             samples_iter = samples[chain, :, dim]
             ess_value = _geyerESS_atomic(samples_iter, thres_estimator, normalize)
             ess_values.append(ess_value)
-    return np.array(ess_values).reshape(n_chains, dims)
+    return jnp.array(ess_values).reshape(n_chains, dims)
+
+def MCSE(samples, ess_values):
+    """
+    Monte-Carlo Standard Error (MCSE).
+    """
+    return jnp.std(samples, axis = 1) / jnp.sqrt(ess_values)
+
+def IACT(samples, ess_values):
+    """
+    Integrated Autocorrelation Time (IACT). The number of Monte-Carlo iterations needed, on average, 
+    for an independent sample to be drawn.
+    """
+    return samples.shape[1] / ess_values
     
