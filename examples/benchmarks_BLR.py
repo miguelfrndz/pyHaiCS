@@ -112,18 +112,14 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
                             integrator = haics.integrators.VerletIntegrator(), 
                             RNG_key = 120)
 
-print(f"Potential Scale Reduction Factor (PSRF): {haics.utils.metrics.PSRF(params_samples)}\n")
-ess_values = haics.utils.metrics.geyerESS(params_samples, 'var_trunc')
-print(f"Effective Sample Size (ESS-Geyer-IMSE): {ess_values}\n")
-print(f"Monte Carlo Standard Error (MCSE): {haics.utils.metrics.MCSE(params_samples, ess_values)}\n")
-print(f"Integrated Autocorrelation Time (IACT): {haics.utils.metrics.IACT(params_samples, ess_values)}\n")
+haics.utils.metrics.compute_metrics(params_samples, thres_estimator = 'var_trunc', normalize_ESS = True)
 
 # Average across chains
 params_samples = jnp.mean(params_samples, axis = 0)
 
 # Make predictions using the samples
 preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
-mean_preds = jnp.mean(preds, axis=0)
+mean_preds = jnp.mean(preds, axis = 0)
 mean_preds = mean_preds > 0.5
 
 # Evaluate the model

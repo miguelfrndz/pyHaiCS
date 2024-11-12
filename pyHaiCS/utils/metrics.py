@@ -76,7 +76,6 @@ def geyerESS(samples, thres_estimator = 'IMSE', normalize = True):
     """
     # TODO: Currently uses Numpy instead of JAX. Implement JAX version with vectorized operations for chains/dimensions.
     samples = np.array(samples)
-    print("Samples Shape for Geyer ESS:", samples.shape)
     n_chains, n_samples, dims = samples.shape
     ess_values = []
     for chain in range(n_chains):
@@ -92,10 +91,55 @@ def MCSE(samples, ess_values):
     """
     return jnp.std(samples, axis = 1) / jnp.sqrt(ess_values)
 
-def IACT(samples, ess_values):
+def IACT(samples, ess_values, normalized_ESS = True):
     """
     Integrated Autocorrelation Time (IACT). The number of Monte-Carlo iterations needed, on average, 
     for an independent sample to be drawn.
     """
+    if normalized_ESS:
+        return samples.shape[1] / (ess_values * samples.shape[1])
     return samples.shape[1] / ess_values
-    
+
+def GRADe(step_grid, ess_values, normalized_ESS = True):
+    # TODO: Implement this as the ratio of the number of grad. computations and the ESS
+    pass
+
+def compute_metrics(samples, thres_estimator = 'IMSE', normalize_ESS = True):
+    """
+    Compute the PSRF, ESS, MCSE, and IACT values for a given set of samples.
+    Prints the results in a tabular format (min/avg/max values).
+
+    Parameters:
+    -----------
+    samples: jnp.ndarray
+        The samples from the MCMC chains. Shape: (n_chains, n_samples, n_dims)
+    thres_estimator: str
+        The threshold estimator to use for the ESS calculation. Default: 'IMSE'
+    normalize_ESS: bool
+        Whether to normalize the ESS values. Default: True
+    """
+    # Compute the PSRF, ESS, MCSE, and IACT values
+    psrf_values = PSRF(samples)
+    # Average across chains + Reshape to consider as one chain
+    samples = jnp.mean(samples, axis = 0)
+    samples = jnp.reshape(samples, (1, samples.shape[0], samples.shape[1]))
+    ess_values = geyerESS(samples, thres_estimator, normalize = normalize_ESS)
+    mcse_values = MCSE(samples, ess_values)
+    iact_values = IACT(samples, ess_values, normalized_ESS = normalize_ESS)
+    # print(f"Potential Scale Reduction Factor (PSRF): {psrf_values}\n")
+    # print(f"Effective Sample Size (ESS-Geyer-IMSE): {ess_values}\n")
+    # print(f"Monte Carlo Standard Error (MCSE): {mcse_values}\n")
+    # print(f"Integrated Autocorrelation Time (IACT): {iact_values}\n")
+
+    # Compute the min/avg/max of the ess/mcse/iact values
+    minPSRF, avgPSRF, maxPSRF = jnp.min(psrf_values), jnp.mean(psrf_values), jnp.max(psrf_values)
+    minESS, avgESS, maxESS = jnp.min(ess_values), jnp.mean(ess_values), jnp.max(ess_values)
+    minMCSE, avgMCSE, maxMCSE = jnp.min(mcse_values), jnp.mean(mcse_values), jnp.max(mcse_values)
+    minIACT, avgIACT, maxIACT = jnp.min(iact_values), jnp.mean(iact_values), jnp.max(iact_values)
+
+    # Print results table
+    print("Sampling Results:")
+    print(f"{' ':<10} {'PSRF':<10} {'ESS':<10} {'MCSE':<10} {'IACT':<10}")
+    print(f"{'Min':<10} {minPSRF:<10.2f} {minESS:<10.2f} {minMCSE:<10.2f} {minIACT:<10.2f}")
+    print(f"{'Avg':<10} {avgPSRF:<10.2f} {avgESS:<10.2f} {avgMCSE:<10.2f} {avgIACT:<10.2f}")
+    print(f"{'Max':<10} {maxPSRF:<10.2f} {maxESS:<10.2f} {maxMCSE:<10.2f} {maxIACT:<10.2f}\n")
