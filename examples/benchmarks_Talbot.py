@@ -38,6 +38,7 @@ class TalbotConfig:
         self.delta_z = self.z_T/self.N_z # Z-Distance between points
 
 talbot_config = TalbotConfig()
+key = jax.random.PRNGKey(42)
 
 def resize_field_unJAXed(field):
     resized_field = jnp.empty([talbot_config.N_t,4*talbot_config.N_x, talbot_config.N_z])
@@ -78,11 +79,27 @@ def fn(x, t, z, k_n):
     return J0(k_n * jnp.sqrt((talbot_config.c * jnp.tan(x)) ** 2 - z ** 2)) * jnp.sin(talbot_config.omega * (jnp.tan(x) + t))
 
 @jax.jit
+def potential_fn(z, k_n, x):
+    return -jnp.log(J0(k_n * jnp.sqrt((talbot_config.c * jnp.tan(x)) ** 2 - z ** 2)))
+
+@jax.jit
 def integrate(t,z,k_n):
     # Integration limits (with change of variable x = tan(tau), dx = 1/cos(tau)^2 dtau)
     int_lower, int_upper = jnp.arctan(jnp.abs(z)/talbot_config.c), jnp.pi/2
-    # Compute the integral
-    integral = quadgk(lambda x: fn(x, t, z, k_n) / jnp.cos(x)**2, [int_lower, int_upper])[0]
+    # Method 1 - Numerical Integration Using quadgk (Gauss-Kronrod quadrature)
+    # integral = quadgk(lambda x: fn(x, t, z, k_n) / jnp.cos(x)**2, [int_lower, int_upper])[0]
+    # Method 2 - Using Hamiltonian Monte-Carlo
+    x = jnp.linspace(int_lower, int_upper, 1000)
+    samples_HMC = haics.samplers.hamiltonian.HMC(x, 
+                        potential_args = (z, k_n),                                           
+                        n_samples = 5000, burn_in = 5000, 
+                        step_size = 1e-3, n_steps = 100, 
+                        potential = potential_fn,  
+                        mass_matrix = jnp.eye(x.shape[0]), 
+                        integrator = haics.integrators.VerletIntegrator(), 
+                        RNG_key = key, n_chains = 4)
+    samples_HMC = jnp.mean(samples_HMC, axis = 0) # Average across chains
+    integral = jnp.mean(jnp.sin(talbot_config.omega * (jnp.tan(samples_HMC) + t))/jnp.cos(samples_HMC)**2)
     return integral
 
 @jax.jit
@@ -164,6 +181,7 @@ def plot_figure(t_i, field):
     return
 
 if __name__ == "__main__":
+    print(f"Running pyHaiCS v.{haics.__version__}")
     A_field = obtain_AField()
     A_field_resized = resize_field_unJAXed(A_field)
     for t_i in tqdm(range(0,talbot_config.N_t)):
