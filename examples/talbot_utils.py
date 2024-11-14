@@ -4,15 +4,20 @@ import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from functools import partial
+from quadax import quadgk
+jax.config.update("jax_enable_x64", True)
 
 def integrate(t, z, k_n, config):
-    return jnp.sin(k_n * (config.c * t - z)) / (k_n * config.c)
+    @jax.jit
+    def func(x):
+        return jnp.sin(config.omega * (t - x / config.c)) * jnp.sin(k_n * x)
+    return quadgk(lambda x: func(x), [0, jnp.pi/2])[0]
 
 def h_n_vectorised(n, config):
     return jax.lax.cond(n == 0, lambda _: 2 * config.w / config.d,
             lambda _: 2 * jnp.sin(n * jnp.pi * config.w / config.d) / (jnp.pi * n),
             operand = None
-            )
+        )
 
 def coefficient_ntz(n, t, z, config):
     k_n = 2 * jnp.pi * n / config.d
@@ -35,7 +40,7 @@ def generate_coeffs(config):
     coords = coords.reshape((3,-1)).T
     
     # We compute the coefficient for each n, t, z
-    coeffs = jax.vmap(coefficient_ntz)(*coords.T, config)
+    coeffs = jax.vmap(partial(coefficient_ntz, config = config))(*coords.T)
 
     # We reshape coeffs back to the original grid shape
     coeffs = coeffs.reshape((config.N_max, config.N_t, config.N_z))
