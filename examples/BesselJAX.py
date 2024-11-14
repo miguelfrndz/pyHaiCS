@@ -1,8 +1,15 @@
 import jax
 import jax.numpy as jnp
 
-# polynomial coefficients for J0
+"""
+JAX Compatible Bessel-J0 function.
 
+This code is a translation of the CEPHES library to JAX, to match the scipy implementation to machine precision.
+
+Thank you @benjaminpop (https://github.com/benjaminpope/jax-bssel)
+"""
+
+# Polynomial Coefficients for J0
 PP0 = [7.96936729297347051624E-4,
         8.28352392107440799803E-2,
         1.23953371646414299388E0,
@@ -46,6 +53,7 @@ YP0 = [1.55924367855235737965E4,
         -3.46628303384729719441E15,
         4.42733268572569800351E16,
         -1.84950800436986690637E16]
+
 YQ0 = [1.04128353664259848412E3,
         6.26107330137134956842E5,
         2.68919633393814121987E8,
@@ -74,24 +82,20 @@ RQ0 = [ 1.0,
 PIO4 = .78539816339744830962 # pi/4
 SQ2OPI = .79788456080286535588 # sqrt(2/pi)
 
-def j0_small(x):
+def __J0_small(x):
     '''
     Implementation of J0 for x < 5 
     '''
     z = x * x
-    # if x < 1.0e-5:
-    #     return 1.0 - z/4.0
-
     p = (z - jnp.array(DR10)) * (z - jnp.array(DR20))
     p = p * jnp.polyval(jnp.array(RP0),z)/jnp.polyval(jnp.array(RQ0), z)
     return jnp.where(x<1e-5,1-z/4.0,p)
     
 
-def j0_large(x):
+def __J0_large(x):
     '''
     Implementation of J0 for x >= 5    
     '''
-
     w = 5.0/x
     q = 25.0/(x*x)
     p = jnp.polyval(jnp.array(PP0), q)/jnp.polyval(jnp.array(PQ0), q)
@@ -100,7 +104,7 @@ def j0_large(x):
     p = p * jnp.cos(xn) - w * q * jnp.sin(xn)
     return p * SQ2OPI / jnp.sqrt(x)
 
-def j0(z):
+def J0(z):
     """
     Bessel function of the first kind of order zero and a real argument 
     - using the implementation from CEPHES, translated to Jax, to match scipy to machine precision.
@@ -122,4 +126,4 @@ def j0(z):
     if jax._src.dtypes.issubdtype(z_dtype, complex):
       raise ValueError("complex input not supported.")
 
-    return jnp.where(jnp.abs(z) < 5.0, j0_small(jnp.abs(z)),j0_large(jnp.abs(z)))
+    return jnp.where(jnp.abs(z) < 5.0, __J0_small(jnp.abs(z)), __J0_large(jnp.abs(z)))

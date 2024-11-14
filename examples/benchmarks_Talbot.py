@@ -9,9 +9,9 @@ jax.config.update("jax_enable_x64", True)
 import pandas as pd
 import pyHaiCS as haics
 from tqdm import tqdm
-from functools import partial
 import matplotlib.pyplot as plt
-from BesselJAX import j0
+from BesselJAX import J0
+from quadax import quadgk
 
 class TalbotConfig:
     """
@@ -29,7 +29,7 @@ class TalbotConfig:
         self.z_T = self._lambda/(1 - jnp.sqrt(1-(self._lambda/self.d)**2)) # Talbot distance = 2 d^2/λ
         # Simulation parameters
         self.N_x = 27 # Number of samples in x direction
-        self.N_z = int(192) # Number of samples in z direction
+        self.N_z = 192 # Number of samples in z direction
         self.N_t = 40 # Number of samples in time
         self.N_max = int(self.d/self._lambda * 10) # Number of terms in the series
         # Other relevant magnitudes
@@ -73,24 +73,23 @@ def h_n_vectorised(n):
         operand=None  # You can pass `n` if needed for other purposes
     )
 
-def fn(x):
-    return j0(kn*jnp.sqrt((c*jnp.tan(x))**2 - z**2)) * jnp.sin(omega*(tau+t))
+@jax.jit
+def fn(x, t, z, k_n):
+    return J0(k_n * jnp.sqrt((talbot_config.c * jnp.tan(x)) ** 2 - z ** 2)) * jnp.sin(talbot_config.omega * (jnp.tan(x) + t))
 
 @jax.jit
-def Integral(t,z,k_n):
-    # Define the function to integrate
-    lambda x: , [jnp.abs(z)/c, jnp.inf])
+def integrate(t,z,k_n):
+    # Integration limits (with change of variable x = tan(tau), dx = 1/cos(tau)^2 dtau)
+    int_lower, int_upper = jnp.arctan(jnp.abs(z)/talbot_config.c), jnp.pi/2
+    # Compute the integral
+    integral = quadgk(lambda x: fn(x, t, z, k_n) / jnp.cos(x)**2, [int_lower, int_upper])[0]
     return integral
 
 @jax.jit
 def coefficient_ntz(n,t,z):
-    # Check that n, t, z are scalars (0-dimensional arrays)
-    #print(n.size, t.size, z.size)
-    #import sys; sys.exit(1)
-
     k_n = 2*jnp.pi * n/talbot_config.d
 
-    c_n = k_n * Integral(t,z,k_n)
+    c_n = k_n * integrate(t,z,k_n)
 
     c_n += jnp.sin(talbot_config.omega*(t+z/talbot_config.c))*(1-jnp.sin(k_n*(talbot_config.c*t+z)))*jnp.heaviside(t+z/talbot_config.c,0.5)
     c_n += jnp.sin(talbot_config.omega*(t-z/talbot_config.c))*(1-jnp.sin(k_n*(talbot_config.c*t-z)))*jnp.heaviside(t-z/talbot_config.c,0.5)
@@ -145,7 +144,6 @@ def plot_figure(t_i, field):
     labels_z = ['$0$', '$\\dfrac{1}{4} Z_T$', '$\\dfrac{1}{2} Z_T$', '$\\dfrac{3}{4} Z_T$', '$Z_T$']
     plt.xticks(ticks_z, labels_z, fontsize = 16)
 
-
     # We make the colorbar look nice
     # cbar = plt.colorbar(im, ticks=[0, A**2/4, A**2/2, 3*A**2/4, A**2], fraction=0.0458*N_z/(4*N_x), pad=0.04, shrink=0.9)  # Muestra la barra de color
     # cbar.set_label(label = 'Intensity of the field', fontsize = 18)
@@ -164,10 +162,6 @@ def plot_figure(t_i, field):
     plt.savefig(os.path.join(folder_path, file_name), bbox_inches='tight')  
     plt.close()
     return
-
-@jax.jit
-def potential_fn():
-    pass
 
 if __name__ == "__main__":
     A_field = obtain_AField()
