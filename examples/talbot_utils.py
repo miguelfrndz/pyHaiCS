@@ -6,12 +6,14 @@ import matplotlib.pyplot as plt
 from functools import partial
 from quadax import quadgk
 jax.config.update("jax_enable_x64", True)
+from BesselJAX import J0
 
 def integrate(t, z, k_n, config):
     @jax.jit
     def func(x):
-        return jnp.sin(config.omega * (t - x / config.c)) * jnp.sin(k_n * x)
-    return quadgk(lambda x: func(x), [0, jnp.pi/2])[0]
+        return J0(k_n * jnp.sqrt((config.c * jnp.tan(x)) ** 2 - z ** 2)) * jnp.sin(config.omega * (jnp.tan(x) + t))
+    return quadgk(lambda x: func(x)/(jnp.cos(x) ** 2), [jnp.arctan(jnp.abs(z)/config.c), jnp.pi/2])[0]
+    # return quadgk(lambda x: func(x), [jnp.abs(z)/config.c, jnp.inf])[0]
 
 def h_n_vectorised(n, config):
     return jax.lax.cond(n == 0, lambda _: 2 * config.w / config.d,
@@ -72,12 +74,13 @@ def resize_field(field, config):
     resized_field[:,3*config.N_x:4*config.N_x,:] = field[:,reversed_order, :]
     return resized_field
 
-def plot_field(t_i, field, config, folder_path):
+def plot_field(t_i, field, config, folder_path, save_field = False):
     cm = 1/2.54
     plt.figure(figsize=(32*cm, 18*cm))
     plt.title('Gauge Field at $t = ' + str(round(t_i * config.delta_t/(config.z_T/config.c),4)) + '\\, Z_T/c$ for $\\frac{d}{\\lambda}='+str(config.d/config._lambda)+'$ and $\\frac{w}{\\lambda}=' + str(config.w/config._lambda)+'$', fontsize = 20, y = 1.05)
     # Plot the Gauge Field
-    im = plt.imshow(field[t_i], cmap='RdBu_r', vmin=-config.A, vmax=config.A, interpolation='none')
+    # im = plt.imshow(field[t_i], cmap='RdBu_r', vmin=-config.A, vmax=config.A, interpolation='none')
+    im = plt.imshow(field[t_i], cmap = 'gray', vmin = -config.A, vmax = config.A, interpolation = 'none')
     # Label the X axis and set the ticks
     plt.ylabel('Grating', fontsize = 18)
     plt.ylim(0, 4 * config.N_x)
@@ -96,5 +99,10 @@ def plot_field(t_i, field, config, folder_path):
     cbar.ax.set_yticklabels(['$-A$', '$-\\dfrac{A}{2}$', '$0$', '$\\dfrac{A}{2}$', '$A$'], fontsize = 16)
 
     file_name = 'd_λ=' + str(config.d/config._lambda) + '_w_λ=' + str(config.w/config._lambda)+'_' + str(t_i) + '_carpet.pdf'
-    plt.savefig(os.path.join(folder_path, file_name), bbox_inches='tight')  
+    plt.savefig(os.path.join(folder_path, file_name), bbox_inches = 'tight', dpi = 300)  
     plt.close()
+
+    if save_field:
+        # Save the field at time t_i to a txt file
+        txt_file_name = 'd_λ=' + str(config.d/config._lambda) + '_w_λ=' + str(config.w/config._lambda)+'_' + str(t_i) + '_carpet.txt'
+        np.savetxt(os.path.join(folder_path, txt_file_name), field[t_i], delimiter=',')

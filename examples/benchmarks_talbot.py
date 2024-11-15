@@ -47,7 +47,7 @@ class TalbotConfig:
             "Z-Distance between points (delta_z)": self.delta_z,
         }
         
-        print("{:<45} {:<40}".format('Parameter', 'Value'))
+        print("{:<45} {:<40}".format('\nParameter', 'Value'))
         print("-" * 65)
         for key, value in params.items():
             print("{:<45} {:<40}".format(key, value))
@@ -69,4 +69,4 @@ if __name__ == "__main__":
     field = generate_amplitude_field(config)
     field = resize_field(field, config)
     for t_i in tqdm(range(0, config.N_t)):
-        plot_field(t_i, field, config, folder_path)
+        plot_field(t_i, field, config, folder_path, save_field = False)
