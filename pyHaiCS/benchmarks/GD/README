@@ -1,1 +1,3 @@
-Note that the files contain, for each D-Dimensional Multivariate Gaussian Distribution, the **inverse** of the covariance matrix.
+Note that the files contain, for each D-Dimensional Multivariate Gaussian Distribution:
+    - `D[dim]_div.txt`: the **inverse** of the covariance matrix.
+    - `D[dim]_div_eig.txt`: the ascending sorted eigenvalues (i.e. the squared frequencies omega_i^2)

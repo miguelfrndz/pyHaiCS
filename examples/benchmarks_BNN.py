@@ -21,7 +21,7 @@ print(f"Running pyHaiCS v.{haics.__version__}")
 filePath = os.path.join(os.path.dirname(__file__), f"../pyHaiCS/benchmarks/BNN/Banana_100.txt")
 y = pd.read_table(filePath, header = None, sep = '\\s+').values.reshape(-1)
 
-# Initialize the model parameters (includes intercept term)
+# Initialize the model parameters
 key = jax.random.PRNGKey(42)
 key_HMC, key_GHMC = jax.random.split(key, 2)
 # y = jax.random.normal(key, shape = (100,))
