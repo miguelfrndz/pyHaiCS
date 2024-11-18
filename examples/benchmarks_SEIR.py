@@ -21,11 +21,17 @@ from scipy.stats import truncnorm
 
 def plot_incidence_curve(data, dates):
     plt.figure(figsize = (10, 6))
-    plt.plot(dates, data, 'o', label = 'Daily Incidence Data', color = 'blue', markersize = 3)
+    plt.plot(dates, data, 'o', label = 'Daily Incidence Data', color = 'black', markersize = 3, alpha = 0.25)
+    corrected_data = np.copy(data)
+    corrected_data[:92] /= 0.15
+    corrected_data[93:281] /= (0.15 + (0.54 - 0.15)*(np.arange(93, 281) - 92)/(231 - 92))
+    corrected_data[281:] /= 0.54
+    plt.plot(dates, corrected_data, 'o', label = 'Incidence Data (Corrected for Undereporting)', color = 'black', markersize = 3)
+    plt.legend()
     plt.title("Daily COVID-19 Incidence in the Basque Country")
     plt.xlabel('Date')
     plt.ylabel('Daily Incidence')
-    # plt.legend()
+    plt.legend()
     plt.grid()
     plt.show()
 
@@ -54,3 +60,16 @@ beta = np.array([-1.6 for _ in range(15)]) # Spline coefficients
 
 coeffs = np.array([alpha, gamma, E0, phi, *beta])
 
+def log_prior(coeffs):
+    """
+    Log-prior of the parameters of the SEIR model.
+    """
+    alpha, gamma, E0, phi, beta = coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4:]
+    alpha_prior = jax.scipy.stats.norm.logpdf(alpha, 0.5, 0.05)
+    gamma_prior = jax.scipy.stats.truncnorm.logpdf(gamma, (gamma_lower_trunc_bound - gamma_mu) / gamma_sigma, 
+                  (gamma_upper_trunc_bound - gamma_mu) / gamma_sigma, 
+                  loc = gamma_mu, scale = gamma_sigma)
+    E0_prior = jax.scipy.stats.norm.logpdf(E0, 21.88, 7.29)
+    phi_prior = jax.scipy.stats.expon.logpdf(phi, 10)
+    beta_prior = jax.scipy.stats.norm.logpdf(beta, -1.6, 0.5).sum()
+    return alpha_prior + gamma_prior + E0_prior + phi_prior + beta_prior
