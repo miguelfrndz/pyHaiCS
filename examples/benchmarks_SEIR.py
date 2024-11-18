@@ -19,13 +19,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import truncnorm
 
-def plot_incidence_curve(data, dates):
-    plt.figure(figsize = (10, 6))
-    plt.plot(dates, data, 'o', label = 'Daily Incidence Data', color = 'black', markersize = 3, alpha = 0.25)
-    corrected_data = np.copy(data)
+def corrected_incidence_data(original_data):
+    """
+    Correct the incidence data for underreporting.
+    """
+    corrected_data = np.copy(original_data)
     corrected_data[:92] /= 0.15
     corrected_data[93:281] /= (0.15 + (0.54 - 0.15)*(np.arange(93, 281) - 92)/(231 - 92))
     corrected_data[281:] /= 0.54
+    return corrected_data
+
+def plot_incidence_curve(original_data, corrected_data, dates, save = False):
+    plt.figure(figsize = (10, 6))
+    plt.plot(dates, original_data, 'o', label = 'Daily Incidence Data', color = 'black', markersize = 3, alpha = 0.25)
     plt.plot(dates, corrected_data, 'o', label = 'Incidence Data (Corrected for Undereporting)', color = 'black', markersize = 3)
     plt.legend()
     plt.title("Daily COVID-19 Incidence in the Basque Country")
@@ -33,14 +39,17 @@ def plot_incidence_curve(data, dates):
     plt.ylabel('Daily Incidence')
     plt.legend()
     plt.grid()
+    if save: plt.savefig('Daily_Incidence_Curve_Basque.pdf')
     plt.show()
 
 filePath = filePath = os.path.join(os.path.dirname(__file__), f"../pyHaiCS/benchmarks/Epidemiological/Basque_Country_covid19_SIR_data.txt")
-data = np.loadtxt(filePath)[:-1] # Last instance is the total population
+original_data = np.loadtxt(filePath)[:-1] # Last instance is the total population
+population_size = int(np.loadtxt(filePath)[-1])
+corrected_data = corrected_incidence_data(original_data)
 # Initial date: 10th of February 2020. Last date: 31st of January 2021
 initial_date, last_date = np.datetime64('2020-02-10'), np.datetime64('2021-01-31')
 dates = np.arange(initial_date, last_date + 1, dtype='datetime64[D]')
-plot_incidence_curve(data, dates)
+plot_incidence_curve(original_data, corrected_data, dates)
 
 # Learning rate for gradient descent optimization
 learning_rate, grad_steps = 1e-7, 3000
@@ -58,7 +67,11 @@ E0 = np.random.normal(21.88, 7.29) # Initial number of exposed individuals
 phi = 0.005 # Dispersion parameter
 beta = np.array([-1.6 for _ in range(15)]) # Spline coefficients
 
+# Initial params of the SEIR model: alpha, gamma, E0, phi, beta
 coeffs = np.array([alpha, gamma, E0, phi, *beta])
+# Initial state of the SEIR model: S0, E1, ..., EM, I1, ..., IK, R, C
+# In this example we test a SEI3R model
+init_state = np.array([population_size - E0, E0, 0, 0, 0, 0, E0])
 
 def log_prior(coeffs):
     """
