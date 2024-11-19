@@ -14,12 +14,14 @@ import sys, os
 sys.path.append('../')
 
 import jax
-import jax.numpy as jnp
 import numpy as np
+import pyHaiCS as haics
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from scipy.stats import truncnorm
 from scipy.interpolate import BSpline
 from scipy.integrate import solve_ivp
+from functools import partial
 
 DEBUG = False
 
@@ -145,9 +147,30 @@ gamma = truncnorm.rvs((gamma_lower_trunc_bound - gamma_mu) / gamma_sigma,
 E0 = np.random.normal(21.88, 7.29) # Initial number of exposed individuals
 # phi = np.random.exponential(10) # Dispersion parameter
 phi = 0.005 # Dispersion parameter
-beta = np.array([-1.6 for _ in range(15)]) # Spline coefficients
+beta = jnp.array([-1.6 for _ in range(15)]) # Spline coefficients
 
 # Initial params of the SEIR model: alpha, gamma, E0, phi, beta
-coeffs = np.array([alpha, gamma, E0, phi, *beta])
+coeffs = jnp.array([alpha, gamma, E0, phi, *beta])
+
+potential = partial(potential_fn, *(corrected_data,))
+potential_grad = jax.grad(potential)
+print(potential(coeffs))
+print(potential_grad(coeffs))
+sys.exit(0)
+
+params_samples_HMC = haics.samplers.hamiltonian.HMC(coeffs, 
+                            potential_args = (corrected_data, ),                                           
+                            n_samples = 1000, burn_in = 100, 
+                            step_size = 1e-3, n_steps = 100, 
+                            potential = potential_fn,  
+                            mass_matrix = jnp.eye(coeffs.shape[0]), 
+                            integrator = haics.integrators.VerletIntegrator(), 
+                            RNG_key = 120, n_chains = 4)
+
+print("Results for HMC")
+haics.utils.metrics.compute_metrics(params_samples_HMC, thres_estimator = 'var_trunc', normalize_ESS = True)
+
+# Average across chains
+params_samples_HMC = jnp.mean(params_samples_HMC, axis = 0)
 
 plot_incidence_curve(original_data, corrected_data, dates)
