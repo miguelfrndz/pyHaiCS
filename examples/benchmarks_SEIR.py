@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import truncnorm
+from scipy.stats import truncnorm, nbinom
 from scipy.interpolate import BSpline
 from scipy.integrate import solve_ivp
 
@@ -128,4 +128,12 @@ solution = solve_ivp(SEMIKR_ODE, t_span, init_state, args = (coeffs,), t_eval = 
 # Extract the solution of the ODE system
 S, E, I, R, C = solution.y[0], solution.y[1:M + 1], solution.y[M + 1:M + K + 1], solution.y[M + K + 1], solution.y[M + K + 2]
 
-plot_incidence_curve(original_data, corrected_data, C, dates)
+# C contains the cumulative incidence data, so we need to compute the daily incidence
+C_pred = np.zeros(len(C))
+C_pred[0] = C[0]
+for i in range(1, len(C)):
+    C_pred[i] = C[i] - C[i - 1]
+# Now extract samples from a negative binomial distribution with n = predicted_daily_incidence, p = phi
+predicted_daily_incidence = np.random.negative_binomial(C_pred, phi)
+
+plot_incidence_curve(original_data, corrected_data, predicted_daily_incidence, dates)
