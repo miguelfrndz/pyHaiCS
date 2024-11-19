@@ -17,9 +17,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import truncnorm, nbinom
+from scipy.stats import truncnorm
 from scipy.interpolate import BSpline
 from scipy.integrate import solve_ivp
+
+DEBUG = False
 
 def log_prior(coeffs):
     """
@@ -31,11 +33,46 @@ def log_prior(coeffs):
                   (gamma_upper_trunc_bound - gamma_mu) / gamma_sigma, 
                   loc = gamma_mu, scale = gamma_sigma)
     E0_prior = jax.scipy.stats.norm.logpdf(E0, 21.88, 7.29)
-    phi_prior = jax.scipy.stats.expon.logpdf(phi, 10)
+    phi_prior = jax.scipy.stats.expon.logpdf(1/phi, 10)
     beta_prior = jax.scipy.stats.norm.logpdf(beta, -1.6, 0.5).sum()
+    if DEBUG: print(f"Alpha prior: {alpha_prior}, Gamma prior: {gamma_prior}, E0 prior: {E0_prior}, Phi prior: {phi_prior}, Beta prior: {beta_prior}")
     return alpha_prior + gamma_prior + E0_prior + phi_prior + beta_prior
 
-def SEMIKR_ODE(t, state, params):
+def log_likelihood(data, params):
+    """
+    Log-likelihood of the SEIR model.
+    """
+    alpha, gamma, E0, phi, beta = params[0], params[1], params[2], params[3], params[4:]
+    # Initial state of the SEIR model: S, E1, ..., EM, I1,..., IK, R, C
+    M, K = 1, 3
+    E_init = np.array([E0] + [0 for _ in range(M - 1)])
+    I_init = np.array([0 for _ in range(K)])
+    init_state = np.concatenate([np.array([population_size - E0]), E_init, I_init, np.array([0, E0])])
+    # Define the spline basis functions for the time-dependent transmission rate (over time)
+    knots = np.linspace(0, 1, 12)
+    spline_basis = lambda t: np.exp(BSpline(knots, beta, k = 3)(t))
+    # Solve the ODE system using the initial parameters
+    t_span = (0, len(data))
+    solution = solve_ivp(SEMIKR_ODE, t_span, init_state, args = (params, M, K, spline_basis), t_eval = np.arange(0, len(data), 1))
+    # Extract the solution of the ODE system
+    S, E, I, R, C = solution.y[0], solution.y[1:M + 1], solution.y[M + 1:M + K + 1], solution.y[M + K + 1], solution.y[M + K + 2]
+    # C contains the cumulative incidence data, so we need to compute the daily incidence
+    C_pred = np.zeros(len(C))
+    C_pred[0] = C[0]
+    for i in range(1, len(C)):
+        C_pred[i] = C[i] - C[i - 1]
+    # Now extract samples from a negative binomial distribution with n = predicted_daily_incidence, p = phi
+    # predicted_daily_incidence = np.random.negative_binomial(C_pred, phi)
+    return jax.scipy.stats.nbinom.logpmf(data, C_pred, phi).sum()
+
+def potential_fn(data, params):
+    """
+    Potential function of the SEIR model.
+    """
+    if DEBUG: print(f"Log-prior: {log_prior(params)}, Log-likelihood: {log_likelihood(data, params)}")
+    return -log_prior(params) - log_likelihood(data, params)
+
+def SEMIKR_ODE(t, state, params, M, K, beta_t):
     """
     System of ODEs of the SEMIKR model.
     """
@@ -47,7 +84,7 @@ def SEMIKR_ODE(t, state, params):
     C = state[M + K + 2]
     alpha, gamma = params[0], params[1]
     # Compute the time-dependent transmission rate
-    beta = spline_basis(t)
+    beta = beta_t(t)
     # Compute the derivatives of the system
     dSdt = -beta * S * I.sum() / population_size
     dEdt = np.zeros(M)
@@ -72,11 +109,11 @@ def corrected_incidence_data(original_data):
     corrected_data[281:] /= 0.54
     return corrected_data
 
-def plot_incidence_curve(original_data, corrected_data, model_pred, dates, save = False):
+def plot_incidence_curve(original_data, corrected_data, dates, save = False):
     plt.figure(figsize = (10, 6))
     plt.plot(dates, original_data, 'o', label = 'Daily Incidence Data', color = 'black', markersize = 3, alpha = 0.25)
     plt.plot(dates, corrected_data, 'o', label = 'Incidence Data (Corrected for Undereporting)', color = 'black', markersize = 3)
-    plt.plot(dates, model_pred, label = 'Model Prediction', color = 'blue')
+    # plt.plot(dates, model_pred, label = 'Model Prediction', color = 'blue')
     plt.legend()
     plt.title("Daily COVID-19 Incidence in the Basque Country")
     plt.xlabel('Date')
@@ -112,28 +149,5 @@ beta = np.array([-1.6 for _ in range(15)]) # Spline coefficients
 
 # Initial params of the SEIR model: alpha, gamma, E0, phi, beta
 coeffs = np.array([alpha, gamma, E0, phi, *beta])
-#  Initial state of the SE_MI_KR model: S, E1, ..., EM, I1,..., IK, R, C
-M, K = 1, 3
-E_init = np.array([E0] + [0 for _ in range(M - 1)])
-I_init = np.array([0 for _ in range(K)])
-init_state = np.concatenate([np.array([population_size - E0]), E_init, I_init, np.array([0, E0])])
-# Define the spline basis functions for the time-dependent transmission rate (over time)
-knots = np.linspace(0, 1, 12)
-spline_basis = lambda t: np.exp(BSpline(knots, beta, k = 3)(t))
 
-# Solve the ODE system using the initial parameters
-t_span = (0, len(corrected_data))
-solution = solve_ivp(SEMIKR_ODE, t_span, init_state, args = (coeffs,), t_eval = np.arange(0, len(corrected_data), 1))
-
-# Extract the solution of the ODE system
-S, E, I, R, C = solution.y[0], solution.y[1:M + 1], solution.y[M + 1:M + K + 1], solution.y[M + K + 1], solution.y[M + K + 2]
-
-# C contains the cumulative incidence data, so we need to compute the daily incidence
-C_pred = np.zeros(len(C))
-C_pred[0] = C[0]
-for i in range(1, len(C)):
-    C_pred[i] = C[i] - C[i - 1]
-# Now extract samples from a negative binomial distribution with n = predicted_daily_incidence, p = phi
-predicted_daily_incidence = np.random.negative_binomial(C_pred, phi)
-
-plot_incidence_curve(original_data, corrected_data, predicted_daily_incidence, dates)
+plot_incidence_curve(original_data, corrected_data, dates)
