@@ -40,39 +40,40 @@ def log_prior(coeffs):
     if DEBUG: print(f"Alpha prior: {alpha_prior}, Gamma prior: {gamma_prior}, E0 prior: {E0_prior}, Phi prior: {phi_prior}, Beta prior: {beta_prior}")
     return alpha_prior + gamma_prior + E0_prior + phi_prior + beta_prior
 
-def log_likelihood(data, params):
+def log_likelihood(data, state, params):
     """
     Log-likelihood of the SEIR model.
     """
     alpha, gamma, E0, phi, beta = params[0], params[1], params[2], params[3], params[4:]
-    # Initial state of the SEIR model: S, E1, ..., EM, I1,..., IK, R, C
-    M, K = 1, 3
-    E_init = np.array([E0] + [0 for _ in range(M - 1)])
-    I_init = np.array([0 for _ in range(K)])
-    init_state = np.concatenate([np.array([population_size - E0]), E_init, I_init, np.array([0, E0])])
-    # Define the spline basis functions for the time-dependent transmission rate (over time)
-    knots = np.linspace(0, 1, 12)
-    spline_basis = lambda t: np.exp(BSpline(knots, beta, k = 3)(t))
     # Solve the ODE system using the initial parameters
     t_span = (0, len(data))
-    solution = solve_ivp(SEMIKR_ODE, t_span, init_state, args = (params, M, K, spline_basis), t_eval = np.arange(0, len(data), 1))
+    solution = solve_ivp(SEMIKR_ODE, t_span, state, args=(params, M, K, spline_basis), t_eval=jnp.arange(0, len(data), 1))
     # Extract the solution of the ODE system
     S, E, I, R, C = solution.y[0], solution.y[1:M + 1], solution.y[M + 1:M + K + 1], solution.y[M + K + 1], solution.y[M + K + 2]
     # C contains the cumulative incidence data, so we need to compute the daily incidence
-    C_pred = np.zeros(len(C))
-    C_pred[0] = C[0]
-    for i in range(1, len(C)):
-        C_pred[i] = C[i] - C[i - 1]
+    C_pred = jnp.zeros(len(C))
+    C_pred = C_pred.at[0].set(C[0])
+    C_pred = C_pred.at[1:].set(C[1:] - C[:-1])
     # Now extract samples from a negative binomial distribution with n = predicted_daily_incidence, p = phi
-    # predicted_daily_incidence = np.random.negative_binomial(C_pred, phi)
     return jax.scipy.stats.nbinom.logpmf(data, C_pred, phi).sum()
 
-def potential_fn(data, params):
+def potential_fn(data, state, params):
     """
     Potential function of the SEIR model.
     """
     if DEBUG: print(f"Log-prior: {log_prior(params)}, Log-likelihood: {log_likelihood(data, params)}")
-    return -log_prior(params) - log_likelihood(data, params)
+    return -log_prior(params) - log_likelihood(data, state, params)
+
+def potential_fn_grad(data, state, params):
+    """
+    Gradient of the potential function of the SEIR model.
+    """
+    # Print shapes of everything
+    print(f"Data shape: {data.shape}, State shape: {state.shape}, Params shape: {params.shape}")
+    grad_prior = jax.grad(log_prior)(params)
+    grad_likelihood = jax.grad(log_likelihood)(data, state, params)
+    print(f"Grad prior: {grad_prior}, Grad likelihood: {grad_likelihood}")
+    return -grad_prior - grad_likelihood
 
 def SEMIKR_ODE(t, state, params, M, K, beta_t):
     """
@@ -148,22 +149,30 @@ E0 = np.random.normal(21.88, 7.29) # Initial number of exposed individuals
 # phi = np.random.exponential(10) # Dispersion parameter
 phi = 0.005 # Dispersion parameter
 beta = jnp.array([-1.6 for _ in range(15)]) # Spline coefficients
-
 # Initial params of the SEIR model: alpha, gamma, E0, phi, beta
-coeffs = jnp.array([alpha, gamma, E0, phi, *beta])
+params = jnp.array([alpha, gamma, E0, phi, *beta])
 
-potential = partial(potential_fn, *(corrected_data,))
-potential_grad = jax.grad(potential)
-print(potential(coeffs))
-print(potential_grad(coeffs))
+# Initial state of the SEIR model: S, E1, ..., EM, I1,..., IK, R, C
+M, K = 1, 3
+E_init = jnp.array([E0] + [0 for _ in range(M - 1)])
+I_init = jnp.array([0 for _ in range(K)])
+state = jnp.concatenate([jnp.array([population_size - E0]), E_init, I_init, jnp.array([0, E0])])
+# Define the spline basis functions for the time-dependent transmission rate (over time)
+knots = jnp.linspace(0, 1, 12)
+spline_basis = lambda t: jnp.exp(BSpline(knots, beta, k = 3)(t))
+
+# Step 1: Optimize the parameters of the SEIR model using gradient descent
+for i in range(grad_steps):
+    params = params - learning_rate * potential_fn_grad(corrected_data, state, params)
+    print(f"Step {i}, Params: {params}")
 sys.exit(0)
 
-params_samples_HMC = haics.samplers.hamiltonian.HMC(coeffs, 
+params_samples_HMC = haics.samplers.hamiltonian.HMC(params, 
                             potential_args = (corrected_data, ),                                           
                             n_samples = 1000, burn_in = 100, 
                             step_size = 1e-3, n_steps = 100, 
                             potential = potential_fn,  
-                            mass_matrix = jnp.eye(coeffs.shape[0]), 
+                            mass_matrix = jnp.eye(params.shape[0]), 
                             integrator = haics.integrators.VerletIntegrator(), 
                             RNG_key = 120, n_chains = 4)
 
