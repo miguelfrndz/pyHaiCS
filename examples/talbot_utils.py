@@ -1,5 +1,6 @@
 import jax
 import os, sys
+sys.path.append('../')
 import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ from functools import partial
 from quadax import quadgk, quadcc
 jax.config.update("jax_enable_x64", True)
 from BesselJAX import J0, J1
+import pyHaiCS as haics
 
 # def integrate(t, z, k_n, config):
 #     @jax.jit
