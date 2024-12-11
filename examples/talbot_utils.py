@@ -4,29 +4,48 @@ import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from functools import partial
-from quadax import quadgk
+from quadax import quadgk, quadcc
 jax.config.update("jax_enable_x64", True)
-from BesselJAX import J0
+from BesselJAX import J0, J1
+
+# def integrate(t, z, k_n, config):
+#     @jax.jit
+#     def func(x):
+#         return J0(k_n * jnp.sqrt((config.c * jnp.tan(x)) ** 2 - z ** 2)) * jnp.sin(config.omega * (jnp.tan(x) + t))
+#     return quadgk(lambda x: func(x)/(jnp.cos(x) ** 2), [jnp.arctan(jnp.abs(z)/config.c), jnp.pi/2])[0]
+#     # return quadgk(lambda x: func(x), [jnp.abs(z)/config.c, jnp.inf])[0]
 
 def integrate(t, z, k_n, config):
     @jax.jit
-    def func(x):
-        return J0(k_n * jnp.sqrt((config.c * jnp.tan(x)) ** 2 - z ** 2)) * jnp.sin(config.omega * (jnp.tan(x) + t))
-    return quadgk(lambda x: func(x)/(jnp.cos(x) ** 2), [jnp.arctan(jnp.abs(z)/config.c), jnp.pi/2])[0]
-    # return quadgk(lambda x: func(x), [jnp.abs(z)/config.c, jnp.inf])[0]
+    def func(tau):
+        return jnp.where((tau - z  <= 1e-5), 
+                         k_n/2 * jnp.sin(config.omega * (tau - t)), 
+                         J1(k_n * jnp.sqrt(tau ** 2 - z ** 2))/jnp.sqrt(tau ** 2 - z ** 2) * jnp.sin(config.omega * (tau - t)))
+    # return quadcc(func, [z, t], max_ninter = 100)[0]
+    return quadgk(func, [z, t])[0]
 
-def h_n_vectorised(n, config):
-    return jax.lax.cond(n == 0, lambda _: 2 * config.w / config.d,
-            lambda _: 2 * jnp.sin(n * jnp.pi * config.w / config.d) / (jnp.pi * n),
-            operand = None
-        )
+# def h_n_vectorised(n, config):
+#     return jax.lax.cond(n == 0, lambda _: 2 * config.w / config.d,
+#             lambda _: 2 * jnp.sin(n * jnp.pi * config.w / config.d) / (jnp.pi * n),
+#             operand = None
+#         )
+
+# def coefficient_ntz(n, t, z, config):
+#     k_n = 2 * jnp.pi * n / config.d
+#     c_n = k_n * integrate(t, z, k_n, config)
+#     c_n += jnp.sin(config.omega * (t + z / config.c))*(1 - jnp.sin(k_n * (config.c * t + z))) * jnp.heaviside(t + z / config.c , 0.5)
+#     c_n += jnp.sin(config.omega * (t - z / config.c))*(1 - jnp.sin(k_n * (config.c * t - z))) * jnp.heaviside(t - z / config.c , 0.5)
+#     c_n *= config.A * h_n_vectorised(n, config) / 2
+#     return c_n
+
+def g_n_vectorised(n, config):
+    return jnp.where((n == 0), 2 * config.w, 2 * jnp.sin(n * jnp.pi * config.w) / (jnp.pi * n))
 
 def coefficient_ntz(n, t, z, config):
     k_n = 2 * jnp.pi * n / config.d
-    c_n = k_n * integrate(t, z, k_n, config)
-    c_n += jnp.sin(config.omega * (t + z / config.c))*(1 - jnp.sin(k_n * (config.c * t + z))) * jnp.heaviside(t + z / config.c , 0.5)
-    c_n += jnp.sin(config.omega * (t - z / config.c))*(1 - jnp.sin(k_n * (config.c * t - z))) * jnp.heaviside(t - z / config.c , 0.5)
-    c_n *= config.A * h_n_vectorised(n, config) / 2
+    c_n = jnp.where((t <= z), 0.0, - k_n * z * integrate(t, z, k_n, config))
+    c_n += jnp.sin(config.omega * (t - z)) * jnp.heaviside(t - z / config.c , 0.5)
+    c_n *= g_n_vectorised(n, config)
     return c_n
 
 def generate_coeffs(config):
