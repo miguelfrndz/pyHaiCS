@@ -105,27 +105,27 @@ for train_index, test_index in skf.split(X, y):
     params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 
     # HMC for posterior sampling
-    params_samples = haics.samplers.hamiltonian.HMC(params, 
-                            potential_args = (X_train, y_train),                                           
-                            n_samples = 5000, burn_in = 5000, 
-                            step_size = 1e-3, n_steps = 100, 
-                            potential = neg_log_posterior_fn,  
-                            mass_matrix = jnp.eye(X_train.shape[1]), 
-                            integrator = haics.integrators.VerletIntegrator(), 
-                            RNG_key = 120)
+    # params_samples = haics.samplers.hamiltonian.HMC(params, 
+    #                         potential_args = (X_train, y_train),                                           
+    #                         n_samples = 5000, burn_in = 5000, 
+    #                         step_size = 1e-3, n_steps = 100, 
+    #                         potential = neg_log_posterior_fn,  
+    #                         mass_matrix = jnp.eye(X_train.shape[1]), 
+    #                         integrator = haics.integrators.VerletIntegrator(), 
+    #                         RNG_key = 120)
     
     # HMC w/s-AIA adaptive scheme for posterior sampling
-    # params_samples = haics.samplers.hamiltonian.sAIA(params,
-    #                         potential_args = (X_train, y_train),
-    #                         n_samples_tune = 1000, 
-    #                         n_samples_check = 200,
-    #                         n_samples_burn_in = 2000,
-    #                         n_samples_prod = 2000,
-    #                         potential = neg_log_posterior_fn,
-    #                         mass_matrix = jnp.eye(X_train.shape[1]),
-    #                         target_AR = 0.92, stage = 2, 
-    #                         sensibility = 0.01, delta_step = 0.01, 
-    #                         compute_freqs = True, sampler = "HMC", RNG_key = 42)
+    params_samples = haics.samplers.hamiltonian.sAIA(params,
+                            potential_args = (X_train, y_train),
+                            n_samples_tune = 1000, 
+                            n_samples_check = 200,
+                            n_samples_burn_in = 2000,
+                            n_samples_prod = 5000,
+                            potential = neg_log_posterior_fn,
+                            mass_matrix = jnp.eye(X_train.shape[1]),
+                            target_AR = 0.92, stage = 2, 
+                            sensibility = 0.01, delta_step = 0.01, 
+                            compute_freqs = True, sampler = "HMC", RNG_key = 42)
     
     ########################### GHMC ###########################
     # Momentum noise is randomly chosen between 0 and 1 (0 not included)
@@ -145,7 +145,7 @@ for train_index, test_index in skf.split(X, y):
     # haics.utils.metrics.compute_metrics(params_samples, thres_estimator = 'var_trunc', normalize_ESS = True)
 
     # Average across chains (remove for s-AIA w/HMC)
-    params_samples = jnp.mean(params_samples, axis = 0)
+    # params_samples = jnp.mean(params_samples, axis = 0)
 
     # Make predictions using the samples
     preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
