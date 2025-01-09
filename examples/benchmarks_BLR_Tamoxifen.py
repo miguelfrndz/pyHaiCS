@@ -101,7 +101,8 @@ for train_index, test_index in skf.split(X, y):
     key = jax.random.PRNGKey(42)
     # Mean vector is the priors for the model parameters & 0 for the intercept term
     mean_vector = jnp.hstack([priors, 0])
-    cov_mat = jnp.eye(X_train.shape[1])
+    cov_mat = jnp.eye(X_train.shape[1]) * (2.5 ** 2)
+    sys.exit(0)
     params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 
     # HMC for posterior sampling
