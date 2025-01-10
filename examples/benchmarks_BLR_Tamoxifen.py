@@ -10,10 +10,9 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 import pandas as pd
 import jax.numpy as jnp
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import make_scorer, precision_score, recall_score, matthews_corrcoef, accuracy_score, f1_score
-
 
 def load_data() -> tuple:
     """
@@ -70,9 +69,10 @@ print(f"Running pyHaiCS v.{haics.__version__}")
 # Load the data
 X, y, priors = load_data()
 
-# Run stratified cross validation
-n_splits = 5
-skf = StratifiedKFold(n_splits = n_splits)
+# Run cross-validation (either Stratified K-Fold or Leave-One-Out)
+# splitter = StratifiedKFold(n_splits = 5)
+splitter = LeaveOneOut()
+n_splits = splitter.get_n_splits(y)
 
 # Lists to store the metrics for each fold
 precision_scores = []
@@ -84,7 +84,7 @@ f1_scores = []
 mcc_scores = []
 
 # Loop through each fold
-for train_index, test_index in skf.split(X, y):
+for train_index, test_index in splitter.split(X, y):
     X_train, X_test = X[train_index], X[test_index]
     y_train, y_test = y[train_index], y[test_index]
 
@@ -105,27 +105,27 @@ for train_index, test_index in skf.split(X, y):
     params = jax.random.multivariate_normal(key, mean_vector, cov_mat)
 
     # HMC for posterior sampling
-    # params_samples = haics.samplers.hamiltonian.HMC(params, 
-    #                         potential_args = (X_train, y_train),                                           
-    #                         n_samples = 5000, burn_in = 5000, 
-    #                         step_size = 1e-3, n_steps = 100, 
-    #                         potential = neg_log_posterior_fn,  
-    #                         mass_matrix = jnp.eye(X_train.shape[1]), 
-    #                         integrator = haics.integrators.VerletIntegrator(), 
-    #                         RNG_key = 120)
+    params_samples = haics.samplers.hamiltonian.HMC(params, 
+                            potential_args = (X_train, y_train),                                           
+                            n_samples = 5000, burn_in = 5000, 
+                            step_size = 1e-3, n_steps = 100, 
+                            potential = neg_log_posterior_fn,  
+                            mass_matrix = jnp.eye(X_train.shape[1]), 
+                            integrator = haics.integrators.VerletIntegrator(), 
+                            RNG_key = 120)
     
     # HMC w/s-AIA adaptive scheme for posterior sampling
-    params_samples = haics.samplers.hamiltonian.sAIA(params,
-                            potential_args = (X_train, y_train),
-                            n_samples_tune = 1000, 
-                            n_samples_check = 200,
-                            n_samples_burn_in = 2000,
-                            n_samples_prod = 5000,
-                            potential = neg_log_posterior_fn,
-                            mass_matrix = jnp.eye(X_train.shape[1]),
-                            target_AR = 0.92, stage = 3, 
-                            sensibility = 0.01, delta_step = 0.01, 
-                            compute_freqs = True, sampler = "HMC", RNG_key = 42)
+    # params_samples = haics.samplers.hamiltonian.sAIA(params,
+    #                         potential_args = (X_train, y_train),
+    #                         n_samples_tune = 1000, 
+    #                         n_samples_check = 200,
+    #                         n_samples_burn_in = 2000,
+    #                         n_samples_prod = 5000,
+    #                         potential = neg_log_posterior_fn,
+    #                         mass_matrix = jnp.eye(X_train.shape[1]),
+    #                         target_AR = 0.92, stage = 3, 
+    #                         sensibility = 0.01, delta_step = 0.01, 
+    #                         compute_freqs = True, sampler = "HMC", RNG_key = 42)
     
     ########################### GHMC ###########################
     # Momentum noise is randomly chosen between 0 and 1 (0 not included)
@@ -146,7 +146,7 @@ for train_index, test_index in skf.split(X, y):
     # haics.utils.metrics.compute_metrics(params_samples, thres_estimator = 'var_trunc', normalize_ESS = True)
 
     # Average across chains (remove for s-AIA w/HMC)
-    # params_samples = jnp.mean(params_samples, axis = 0)
+    params_samples = jnp.mean(params_samples, axis = 0)
 
     # Make predictions using the samples
     preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
@@ -154,11 +154,11 @@ for train_index, test_index in skf.split(X, y):
     y_test_pred = (y_test_pred >= 0.5).astype("int")
 
     # Compute metrics
-    precision_scores.append(precision_score(y_test, y_test_pred))
-    recall_scores.append(recall_score(y_test, y_test_pred))
-    sensitivity_scores.append(recall_score(y_test, y_test_pred))
-    specificity_scores.append(recall_score(y_test, y_test_pred, pos_label = 0))
-    f1_scores.append(f1_score(y_test, y_test_pred))
+    precision_scores.append(precision_score(y_test, y_test_pred, zero_division = 1))
+    recall_scores.append(recall_score(y_test, y_test_pred, zero_division = 1))
+    sensitivity_scores.append(recall_score(y_test, y_test_pred, zero_division = 1))
+    specificity_scores.append(recall_score(y_test, y_test_pred, pos_label = 0, zero_division = 1))
+    f1_scores.append(f1_score(y_test, y_test_pred, zero_division = 1))
     mcc_scores.append(matthews_corrcoef(y_test, y_test_pred))
     accuracy_scores.append(accuracy_score(y_test, y_test_pred))
 
