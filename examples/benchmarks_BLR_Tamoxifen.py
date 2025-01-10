@@ -123,7 +123,7 @@ for train_index, test_index in skf.split(X, y):
                             n_samples_prod = 5000,
                             potential = neg_log_posterior_fn,
                             mass_matrix = jnp.eye(X_train.shape[1]),
-                            target_AR = 0.92, stage = 2, 
+                            target_AR = 0.92, stage = 3, 
                             sensibility = 0.01, delta_step = 0.01, 
                             compute_freqs = True, sampler = "HMC", RNG_key = 42)
     
@@ -142,6 +142,7 @@ for train_index, test_index in skf.split(X, y):
     #                             integrator = haics.integrators.VerletIntegrator(), 
     #                             RNG_key = 120)
 
+    ############################################################
     # haics.utils.metrics.compute_metrics(params_samples, thres_estimator = 'var_trunc', normalize_ESS = True)
 
     # Average across chains (remove for s-AIA w/HMC)
@@ -160,6 +161,9 @@ for train_index, test_index in skf.split(X, y):
     f1_scores.append(f1_score(y_test, y_test_pred))
     mcc_scores.append(matthews_corrcoef(y_test, y_test_pred))
     accuracy_scores.append(accuracy_score(y_test, y_test_pred))
+
+    # To avoid problems with compilation caches in memory, we perform some manual garbage collection :)
+    jax.clear_caches()
 
 # Calculate the global averages
 average_precision = np.mean(precision_scores)
