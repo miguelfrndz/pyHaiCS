@@ -14,12 +14,17 @@ from sklearn.model_selection import StratifiedKFold, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import make_scorer, precision_score, recall_score, matthews_corrcoef, accuracy_score, f1_score
 
-def load_data() -> tuple:
+def load_data(dataset) -> tuple:
     """
-    Load the data.
+    Load the data from the specified dataset.
     """
-    X = np.loadtxt('cancer_data/X_data.txt', delimiter = ',')
-    y = np.loadtxt('cancer_data/Y_data.txt', delimiter = ',')
+    if dataset == 'TCGA':
+        X = np.loadtxt('cancer_data/X_data_TCGA.txt', delimiter = ',')
+        y = np.loadtxt('cancer_data/Y_data_TCGA.txt', delimiter = ',')
+    elif dataset == 'METABRIC':
+        raise NotImplementedError
+    else:
+        raise ValueError('Invalid dataset. Choose between "TCGA" and "METABRIC"')
     priors = np.loadtxt('cancer_data/priors.txt', delimiter = ',')
     return X, y, priors
 
