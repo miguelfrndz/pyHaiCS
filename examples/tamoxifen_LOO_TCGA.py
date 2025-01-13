@@ -8,13 +8,15 @@ import pyHaiCS as haics
 import jax
 jax.config.update("jax_enable_x64", True)
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import jax.numpy as jnp
 from sklearn.model_selection import StratifiedKFold, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import make_scorer, precision_score, recall_score, matthews_corrcoef, accuracy_score, f1_score
+from imblearn.over_sampling import SMOTE
 
-def load_data(dataset) -> tuple:
+def load_data(dataset) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Load the data from the specified dataset.
     """
@@ -22,7 +24,8 @@ def load_data(dataset) -> tuple:
         X = np.loadtxt('cancer_data/X_data_TCGA.txt', delimiter = ',')
         y = np.loadtxt('cancer_data/Y_data_TCGA.txt', delimiter = ',')
     elif dataset == 'METABRIC':
-        raise NotImplementedError
+        data = pd.read_csv('cancer_data/patients_metabric.csv')
+        X, y = data.iloc[:, 1:-1].values, data.iloc[:, -1].values
     else:
         raise ValueError('Invalid dataset. Choose between "TCGA" and "METABRIC"')
     priors = np.loadtxt('cancer_data/priors.txt', delimiter = ',')
@@ -72,11 +75,15 @@ def neg_log_posterior_fn(x, y, params):
 print(f"Running pyHaiCS v.{haics.__version__}")
 
 # Load the data
-X, y, priors = load_data()
+X, y, priors = load_data(dataset = 'TCGA')
+
+# Apply SMOTE to balance the classes
+smote = SMOTE(sampling_strategy = 'minority', random_state = 42)
+X, y = smote.fit_resample(X, y)
 
 # Run cross-validation (either Stratified K-Fold or Leave-One-Out)
-# splitter = StratifiedKFold(n_splits = 5)
-splitter = LeaveOneOut()
+splitter = StratifiedKFold(n_splits = 5)
+# splitter = LeaveOneOut()
 n_splits = splitter.get_n_splits(y)
 
 # Lists to store the metrics for each fold
