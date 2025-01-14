@@ -16,6 +16,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import make_scorer, precision_score, recall_score, matthews_corrcoef, accuracy_score, f1_score
 from imblearn.over_sampling import SMOTE
 
+OVERSAMPLE = False
+
 def load_data(dataset) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Load the data from the specified dataset.
@@ -77,9 +79,10 @@ print(f"Running pyHaiCS v.{haics.__version__}")
 # Load the data
 X, y, priors = load_data(dataset = 'TCGA')
 
-# Apply SMOTE to balance the classes
-smote = SMOTE(sampling_strategy = 'minority', random_state = 42)
-X, y = smote.fit_resample(X, y)
+if OVERSAMPLE:
+    # Apply SMOTE to balance the classes
+    smote = SMOTE(sampling_strategy = 'minority', random_state = 42)
+    X, y = smote.fit_resample(X, y)
 
 # Run cross-validation (either Stratified K-Fold or Leave-One-Out)
 splitter = StratifiedKFold(n_splits = 5)
@@ -90,7 +93,6 @@ n_splits = splitter.get_n_splits(y)
 precision_scores = []
 recall_scores = []
 accuracy_scores = []
-sensitivity_scores = []
 specificity_scores = []
 f1_scores = []
 mcc_scores = []
@@ -168,7 +170,6 @@ for train_index, test_index in splitter.split(X, y):
     # Compute metrics
     precision_scores.append(precision_score(y_test, y_test_pred, zero_division = 1))
     recall_scores.append(recall_score(y_test, y_test_pred, zero_division = 1))
-    sensitivity_scores.append(recall_score(y_test, y_test_pred, zero_division = 1))
     specificity_scores.append(recall_score(y_test, y_test_pred, pos_label = 0, zero_division = 1))
     f1_scores.append(f1_score(y_test, y_test_pred, zero_division = 1))
     mcc_scores.append(matthews_corrcoef(y_test, y_test_pred))
@@ -180,7 +181,6 @@ for train_index, test_index in splitter.split(X, y):
 # Calculate the global averages
 average_precision = np.mean(precision_scores)
 average_recall = np.mean(recall_scores)
-average_sensitivity = np.mean(sensitivity_scores)
 average_specificity = np.mean(specificity_scores)
 average_f1 = np.mean(f1_scores)
 average_mcc = np.mean(mcc_scores)
@@ -190,8 +190,7 @@ average_accuracy = np.mean(accuracy_scores)
 metrics_df = pd.DataFrame({
     'Fold': range(1, n_splits + 1),
     'Precision': precision_scores,
-    'Recall': recall_scores,
-    'Sensitivity': sensitivity_scores,
+    'Recall/Sensitivity': recall_scores,
     'Specificity': specificity_scores,
     'F1': f1_scores,
     'MCC': mcc_scores,
@@ -199,5 +198,5 @@ metrics_df = pd.DataFrame({
 })
 
 # Adding global averages
-metrics_df.loc['Average'] = ['-', average_precision, average_recall, average_sensitivity, average_specificity, average_f1, average_mcc, average_accuracy]
+metrics_df.loc['Average'] = ['-', average_precision, average_recall, average_specificity, average_f1, average_mcc, average_accuracy]
 print(metrics_df)
