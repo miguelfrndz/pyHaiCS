@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from functools import partial
 from quadax import quadgk, quadcc
+from scipy.integrate import quad
 jax.config.update("jax_enable_x64", True)
 from BesselJAX import J0, J1
 import pyHaiCS as haics
@@ -79,54 +80,16 @@ def perform_integrals(config):
     partial_integral_sin = np.zeros((len(n_values),len(t_values),len(z_values)))
     partial_integral_cos = np.zeros((len(n_values),len(t_values),len(z_values)))
 
+    # Define the integrands
+    integrand_sin = lambda tau, n, t, z: np.sin(config.omega * (tau - t)) * J1(k_n_values[n] * (tau - z)) * np.heaviside(t - tau, 0.5)
+    integrand_cos = lambda tau, n, t, z: np.cos(config.omega * (tau - t)) * J1(k_n_values[n] * (tau - z)) * np.heaviside(t - tau, 0.5)
 
-    # Load the compiled libraries with ctypes
-    int_t = ctypes.c_int
-    double_t = ctypes.c_double
-    ptr_t = ctypes.POINTER(double_t)
-
-    # Utility function
-    ptr = lambda array: array.ctypes.data_as(ptr_t)
-
-    # We load the compiled libraries with ctypes
-    lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
-    lib_extension = '.dylib' if os.name == 'posix' else '.so' # Depends on OS. dylib for Mac, so for UNIX
-    fast_integrals = ctypes.CDLL(os.path.join(lib_path, f'libintegrals{lib_extension}'))
-    fast_integrals.compute_cos.argtypes = [
-        ptr_t, ptr_t, ptr_t, ptr_t, ptr_t, ptr_t,
-        int_t, int_t, int_t, int_t,
-        double_t, double_t, double_t, double_t
-    ]
-    fast_integrals.compute_cos.restype = None
-
-    fast_integrals.compute_sin.argtypes = [
-        ptr_t, ptr_t, ptr_t, ptr_t, ptr_t, ptr_t,
-        int_t, int_t, int_t, int_t,
-        double_t, double_t, double_t, double_t
-    ]
-    fast_integrals.compute_sin.restype = None
-
-    # We perform the integrals
-    limit = 100_000
-    eps_abs = 1e-6
-    eps_rel = 1e-3
-    epsilon = 1e-6
-
-    fast_integrals.compute_cos(
-        ptr(partial_integral_cos), ptr(x_min), ptr(x_max), 
-        ptr(k_n_values), ptr(t_values), ptr(z_values), 
-        len(n_values), len(t_values), len(z_values), 
-        limit, eps_abs, eps_rel, 
-        config.omega, epsilon
-    )
-
-    fast_integrals.compute_sin(
-        ptr(partial_integral_sin), ptr(x_min), ptr(x_max), 
-        ptr(k_n_values), ptr(t_values), ptr(z_values), 
-        len(n_values), len(t_values), len(z_values), 
-        limit, eps_abs, eps_rel, 
-        config.omega, epsilon
-    )
+    # Perform the integrals
+    for n in range(len(n_values)):
+        for i in range(len(t_values)):
+            for j in tqdm(range(len(z_values))):
+                partial_integral_sin[n, i, j] = quad(integrand_sin, x_min[i, j], x_max[i, j], args=(n, t_values[i], z_values[j]))[0]
+                partial_integral_cos[n, i, j] = quad(integrand_cos, x_min[i, j], x_max[i, j], args=(n, t_values[i], z_values[j]))[0]
 
     # Initialize the result array
     resummed_integral_sin = np.empty((len(n_values), len(t_values), len(z_values)))
@@ -229,7 +192,7 @@ def generate_amplitude_field(config):
     return field
 
 def resize_field(field, config):
-    '''Extends the domain of the solution from $0 \leq x \leq d/2$ to $-d \leq x \leq d$ using its symmetry.
+    """ Extends the domain of the solution from $0 \leq x \leq d/2$ to $-d \leq x \leq d$ using its symmetry.
     
     Parameters
     ----------
@@ -242,7 +205,7 @@ def resize_field(field, config):
     -------
     resized_field : np.ndarray of floats
         The values of the field $u(t,x,z)$ at each t,x,z with for $-d \leq x \leq d$. Its shape is (N_t, 4 N_x, N_z).
-    '''
+    """
     # We allocate the new array
     resized_field = np.empty([config.N_t, 4 * config.N_x, config.N_z])
 

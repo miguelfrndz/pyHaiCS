@@ -1,6 +1,7 @@
 import jax
-import os, sys
+import os, sys, io
 import numpy as np
+from datetime import datetime
 from tqdm import tqdm
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -84,12 +85,15 @@ class TalbotConfig:
             "Initial time / z_T": self.initial_t_zT,
             "Final time / z_T": self.final_t_zT,
         }
-        
-        print("{:<45} {:<40}".format('\nParameter', 'Value'))
-        print("-" * 65)
+        output = io.StringIO()
+        # Print to the string stream instead of the console
+        output.write("{:<45} {:<40}\n".format('Parameter', 'Value'))
+        output.write("-" * 65 + "\n")
         for key, value in params.items():
-            print("{:<45} {:<40}".format(key, value))
-        return ""
+            output.write("{:<45} {:<40}\n".format(key, value))        
+        result = output.getvalue()
+        output.close()
+        return result
 
 if __name__ == "__main__":
     config = TalbotConfig()
@@ -97,14 +101,40 @@ if __name__ == "__main__":
 
     # Photo destination
     my_path = os.path.dirname(os.path.abspath(__file__))
-    folder_name = 'd_λ=' + str(config.d/config._lambda) + '_w_λ=' + str(config.w/config._lambda)
-    folder_path = os.path.join(my_path, folder_name)
+    results_path = os.path.join(my_path, 'talbot_results')
 
     # Create the folder if it doesn't exist
-    if not os.path.isdir(folder_path):
+    if not os.path.isdir(results_path):
+        os.makedirs(results_path)
+
+    # Create the folder for the simulation
+    folder_name = 'd_λ=' + str(config.d/config._lambda) + '_w_λ=' + str(config.w/config._lambda) + '_' + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    folder_path = os.path.join(results_path, folder_name)
+    if not os.path.isdir(folder_path): # Create the folder if it doesn't exist
         os.makedirs(folder_path)
 
-    field = generate_amplitude_field(config)
-    field = resize_field(field, config)
+    # Save the parameters of the simulation into a file
+    with open(os.path.join(folder_path, 'parameters.txt'), 'w') as file:
+        file.write(str(config)) 
+
+    # We compute the intensity of the light and extend it to -d <= x <= d
+    field = generate_amplitude_field(config) # We compute the amplitude of the solution
+    field = field**2 # We compute the intensity of the light
+    field = resize_field(field, config) # We use the symmetry of the solution to extend the domain to -d <= x <= d
+
+    # We create the caché folder if it doesn't exist
+    cache_path = os.path.join(folder_path, 'cache')
+    if not os.path.isdir(cache_path):
+        os.makedirs(cache_path)
+
+    # We plot the solution at each time t_i at cache
     for t_i in tqdm(range(0, config.N_t)):
-        plot_field(t_i, field, config, folder_path, save_field = False)
+        title = 'Intensity of the field at $t = ' + str(round(t_i * config.delta_t/(config.z_T),4)) + '\\, Z_T/c$ for $\\frac{d}{\\lambda}='+str(1/config._lambda)+'$ and $\\frac{w}{\\lambda}=' + str(config.w/config._lambda)+'$'
+        file_name = 'd_λ=' + str(1/config._lambda) + '_w_λ=' + str(config.w/config._lambda)+'_' + str(t_i).rjust(len(str(config.N_t)),'0') + '_carpet.png'
+        plot_field(field[t_i], config, cache_path, title, file_name, save_field = False, cmap = colour)
+
+    # We plot the final image also somewhere else to store it
+    final_field = field[config.N_t - 1]
+    del field
+    file_name = 'd_λ=' + str(1/config._lambda) + '_w_λ=' + str(config.w/config._lambda)+'_TRANSIENT_carpet.png'
+    plot_field(final_field, config, folder_path, title, file_name, save_field = False, cmap = 'gray')
