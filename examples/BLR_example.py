@@ -97,6 +97,26 @@ mean_preds = mean_preds > 0.5
 accuracy = jnp.mean(mean_preds == y_test)
 print(f"Accuracy (w/ HMC Sampling): {accuracy}\n")
 
+##################### RW-MH #####################
+
+params_samples = haics.samplers.basic_mcmc.RWMH(params,
+                            potential_args = (X_train, y_train),
+                            n_samples = 1000, burn_in = 200,
+                            step_size = 1e-3, potential = neg_log_posterior_fn,
+                            n_chains = 4, RNG_key = 42)
+
+# Average across chains
+params_samples = jnp.mean(params_samples, axis = 0)
+
+# Make predictions using the samples
+preds = jax.vmap(lambda params: model_fn(X_test, params))(params_samples)
+mean_preds = jnp.mean(preds, axis=0)
+mean_preds = mean_preds > 0.5
+
+# Evaluate the model
+accuracy = jnp.mean(mean_preds == y_test)
+print(f"Accuracy (w/ RW-MH Sampling): {accuracy}\n")
+
 ##################### HMC w/s-AIA Adaptive Scheme #####################
 
 # HMC w/s-AIA for posterior sampling
