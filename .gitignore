@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 examples/d_*/
 examples/cancer_data/
+talbot_results/
