@@ -54,7 +54,7 @@ class TalbotConfig:
         # Grid Simulation parameters
         self.N_x = 27 * 10 # Number of samples in x direction
         self.N_z = 192 * 10 # Number of samples in z direction
-        self.N_t = 250 # Number of samples in time
+        self.N_t = 25 # Number of samples in time (FIXME: was 250)
 
         # Simulation parameters
         self.N_max = int(self.d / self._lambda * 5) # Number of terms in the series
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     for t_i in tqdm(range(0, config.N_t)):
         title = 'Intensity of the field at $t = ' + str(round(t_i * config.delta_t/(config.z_T),4)) + '\\, Z_T/c$ for $\\frac{d}{\\lambda}='+str(1/config._lambda)+'$ and $\\frac{w}{\\lambda}=' + str(config.w/config._lambda)+'$'
         file_name = 'd_λ=' + str(1/config._lambda) + '_w_λ=' + str(config.w/config._lambda)+'_' + str(t_i).rjust(len(str(config.N_t)),'0') + '_carpet.png'
-        plot_field(field[t_i], config, cache_path, title, file_name, save_field = False, cmap = colour)
+        plot_field(field[t_i], config, cache_path, title, file_name, save_field = False, cmap = 'gray')
 
     # We plot the final image also somewhere else to store it
     final_field = field[config.N_t - 1]

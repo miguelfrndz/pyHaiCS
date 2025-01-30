@@ -10,7 +10,17 @@ from quadax import quadgk, quadcc
 from scipy.integrate import quad
 jax.config.update("jax_enable_x64", True)
 from BesselJAX import J0, J1
+from scipy.special import j1
 import pyHaiCS as haics
+
+MC_SAMPLES = 100_000
+
+@jax.jit
+def integrand(tau, kn, t, z, omega, epsilon=1e-3):
+    u = jnp.sqrt(jnp.maximum(0, tau ** 2 - z ** 2))
+    mask = u < epsilon
+    result = jnp.where(mask, jnp.sin(omega * (tau - t)) * kn * 1/2, jnp.sin(omega * (tau - t)) * J1(kn * u) / u)
+    return result
 
 def g_n_rect_delta(n, config):
     '''Computes the g_n of the Rect function NORMALISED so that it tends to the delta function.
@@ -77,32 +87,22 @@ def perform_integrals(config):
     x_max = np.maximum(z_values[None, :], t_values[:, None])  # Max between z_values[j] and t_values[i]
         
     # Prealocate the result arrays
-    partial_integral_sin = np.zeros((len(n_values),len(t_values),len(z_values)))
-    partial_integral_cos = np.zeros((len(n_values),len(t_values),len(z_values)))
-
-    # Define the integrands
-    integrand_sin = lambda tau, n, t, z: np.sin(config.omega * (tau - t)) * J1(k_n_values[n] * (tau - z)) * np.heaviside(t - tau, 0.5)
-    integrand_cos = lambda tau, n, t, z: np.cos(config.omega * (tau - t)) * J1(k_n_values[n] * (tau - z)) * np.heaviside(t - tau, 0.5)
+    integral = np.zeros((len(n_values),len(t_values),len(z_values)))
 
     # Perform the integrals
-    for n in range(len(n_values)):
+    for n in tqdm(range(len(n_values))):
         for i in range(len(t_values)):
-            for j in tqdm(range(len(z_values))):
-                partial_integral_sin[n, i, j] = quad(integrand_sin, x_min[i, j], x_max[i, j], args=(n, t_values[i], z_values[j]))[0]
-                partial_integral_cos[n, i, j] = quad(integrand_cos, x_min[i, j], x_max[i, j], args=(n, t_values[i], z_values[j]))[0]
-
-    # Initialize the result array
-    resummed_integral_sin = np.empty((len(n_values), len(t_values), len(z_values)))
-    resummed_integral_cos = np.empty((len(n_values), len(t_values), len(z_values)))
-
-    # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
-    resummed_integral_sin[:, :, :] = np.cumsum(partial_integral_sin[:, :, :], axis=1)
-    resummed_integral_cos[:, :, :] = np.cumsum(partial_integral_cos[:, :, :], axis=1)
+            for j in range(len(z_values)):
+                # Monte Carlo integration
+                samples = np.random.uniform(x_min[i, j], x_max[i, j], MC_SAMPLES)
+                integrand_values = integrand(samples, k_n_values[n], t_values[i], z_values[j], config.omega)
+                integral[n, i, j] = (x_max[i, j] - x_min[i, j]) * np.mean(integrand_values)
 
     # Initialize the result array
     result = np.empty((len(n_values), len(t_values), len(z_values)))
-    result = np.sin(config.omega * t_values[None,:,None]) * resummed_integral_cos \
-        - np.cos(config.omega * t_values[None,:,None]) * resummed_integral_sin # sin(tau-t) = cos(t)sin(tau) - sin(t)cos(tau)
+
+    # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
+    result[:, :, :] = np.cumsum(integral[:, :, :], axis = 1)
 
     return result
 
