@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -shared -fPIC
+CFLAGS = -shared -fPIC -fopenmp
 LIBS = -lm -lgsl -lgslcblas
 TARGET = monte_carlo_integral.so
 SRC = monte_carlo_integral.c
