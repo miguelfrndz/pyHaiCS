@@ -21,8 +21,8 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
         
         #pragma omp parallel for collapse(2)
         for (int i = 0; i < N_t; i++) {
-            double t = t_values[i];
             for (int j = 0; j < N_z; j++) {
+                double t = t_values[i];
                 double z = z_values[j];
                 double z_sq = z * z;
                 double min_x = x_min[i * N_z + j];
