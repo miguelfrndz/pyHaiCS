@@ -12,8 +12,21 @@ jax.config.update("jax_enable_x64", True)
 from BesselJAX import J0, J1
 from scipy.special import j1
 import pyHaiCS as haics
+import ctypes
 
-MC_SAMPLES = 100_000
+USE_C_VERSION = True
+
+if USE_C_VERSION:
+    # Load the compiled C shared library
+    lib = ctypes.CDLL('./monte_carlo_integral.so')
+
+    # Define the C function prototype
+    lib.monte_carlo_integrate.argtypes = [
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_double, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_double)
+    ]
 
 @jax.jit
 def integrand(tau, kn, t, z, omega, epsilon=1e-3):
@@ -87,22 +100,38 @@ def perform_integrals(config):
     x_max = np.maximum(z_values[None, :], t_values[:, None])  # Max between z_values[j] and t_values[i]
         
     # Prealocate the result arrays
-    integral = np.zeros((len(n_values),len(t_values),len(z_values)))
+    integral = np.zeros((len(n_values), len(t_values), len(z_values)), dtype = np.float64)
 
-    # Perform the integrals
-    for n in tqdm(range(len(n_values))):
-        for i in range(len(t_values)):
-            for j in range(len(z_values)):
-                # Monte Carlo integration
-                samples = np.random.uniform(x_min[i, j], x_max[i, j], MC_SAMPLES)
-                integrand_values = integrand(samples, k_n_values[n], t_values[i], z_values[j], config.omega)
-                integral[n, i, j] = (x_max[i, j] - x_min[i, j]) * np.mean(integrand_values)
+    if USE_C_VERSION:
+        # Call C function
+        lib.monte_carlo_integrate(
+            n_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            k_n_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            t_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            z_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            x_min.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            x_max.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            ctypes.c_double(config.omega),
+            ctypes.c_int(len(n_values)), ctypes.c_int(len(t_values)), ctypes.c_int(len(z_values)),
+            ctypes.c_int(config.mc_samples), integral.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+        )
 
-    # Initialize the result array
-    result = np.empty((len(n_values), len(t_values), len(z_values)))
+        result = np.cumsum(integral, axis = 1)
+    else:
+        # Perform the integrals
+        for n in tqdm(range(len(n_values))):
+            for i in range(len(t_values)):
+                for j in range(len(z_values)):
+                    # Monte Carlo integration
+                    samples = np.random.uniform(x_min[i, j], x_max[i, j], config.mc_samples)
+                    integrand_values = integrand(samples, k_n_values[n], t_values[i], z_values[j], config.omega)
+                    integral[n, i, j] = (x_max[i, j] - x_min[i, j]) * np.mean(integrand_values)
 
-    # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
-    result[:, :, :] = np.cumsum(integral[:, :, :], axis = 1)
+        # Initialize the result array
+        result = np.empty((len(n_values), len(t_values), len(z_values)))
+
+        # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
+        result[:, :, :] = np.cumsum(integral[:, :, :], axis = 1)
 
     return result
 

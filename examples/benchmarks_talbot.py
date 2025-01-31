@@ -66,6 +66,9 @@ class TalbotConfig:
         self.delta_x = self.d/2/self.N_x # X-Distance between points
         self.delta_z = self.z_T/self.N_z # Z-Distance between points
 
+        # Parameters for the Monte-Carlo simulation
+        self.mc_samples = 5000 # Number of samples for the Monte-Carlo simulation
+
     def __str__(self):
         params = {
             "Amplitude of the source (A)": self.A,
@@ -84,6 +87,7 @@ class TalbotConfig:
             "Z-Distance between points (delta_z)": self.delta_z,
             "Initial time / z_T": self.initial_t_zT,
             "Final time / z_T": self.final_t_zT,
+            "Number of Monte-Carlo samples": self.mc_samples
         }
         output = io.StringIO()
         # Print to the string stream instead of the console

@@ -4,3 +4,10 @@ __pycache__/
 examples/d_*/
 examples/cancer_data/
 talbot_results/
+*.so
+*.o
+*.a
+*.dylib
+*.dll
+*.exe
+*.out
