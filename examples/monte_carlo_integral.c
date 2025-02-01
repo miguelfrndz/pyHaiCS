@@ -8,6 +8,7 @@
 #include <time.h>
 
 #define ASYMPTOTIC_TOLERANCE 1e-6
+#define LIMIT 100000
 #define SOLVING_MODE_MC 1
 #define SOLVING_MODE_GSL 2
 #define SOLVING_MODE SOLVING_MODE_GSL
@@ -120,23 +121,27 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                     F.params   = &params;
                     
                     double result, error;
-                    gsl_integration_workspace *workspace = gsl_integration_workspace_alloc(1024*1024*16);
-                    gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1024*1024*16);
+                    // gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1024*1024*16);
+                    // gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1024*1024*16);
+                    gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1e5);
+                    gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1e5);
                     
-                    int status_qag = gsl_integration_qag(&F, min_x, max_x, 1e-6, 1e-6, 
-                                            1024*1024*16, GSL_INTEG_GAUSS41, 
-                                            workspace, &result, &error);
+                    int status_qag = gsl_integration_qag(&F, min_x, max_x, 1e-6, 1e-3, 
+                                            LIMIT, GSL_INTEG_GAUSS41, 
+                                            workspace_qag, &result, &error);
 
                     // If QAG fails, try CQUAD
                     if (status_qag){
-                        printf("QAG failed. Trying CQUAD...\n");
-                        gsl_integration_cquad(&F, min_x, max_x, 1e-6, 1e-6, 
+                        #ifdef DEBUG
+                            printf("QAG failed. Trying CQUAD...\n");
+                        #endif
+                        gsl_integration_cquad(&F, min_x, max_x, 1e-6, 1e-3, 
                                             workspace_cquad, &result, &error, NULL);
                     }
-                    
-                    gsl_integration_workspace_free(workspace);
+
+                    gsl_integration_workspace_free(workspace_qag);
                     gsl_integration_cquad_workspace_free(workspace_cquad);
-                    
+
                     integral[n * N_t * N_z + i * N_z + j] = result;
                 #endif
                 }
