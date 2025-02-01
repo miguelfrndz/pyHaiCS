@@ -5,12 +5,8 @@ import numpy as np
 from tqdm import tqdm
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from functools import partial
-from quadax import quadgk, quadcc
-from scipy.integrate import quad
 jax.config.update("jax_enable_x64", True)
-from BesselJAX import J0, J1
-from scipy.special import j1
+from BesselJAX import J1
 import pyHaiCS as haics
 import ctypes
 

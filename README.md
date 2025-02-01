@@ -33,3 +33,23 @@ The following samplers have been implemented in `pyHaiCS`:
 - `Samplers`: Contains all the implemented samplers (see section above).
 - `Tests`: Test folder. Preferably, run the `run_tests.sh` instead of running each test individually. You might be required to give execution rights to the script using the following command: `chmod +x run_tests.sh`.
 - `Utils`: Contains general utilities used by `pyHaiCS`.
+
+## Instructions to Run the Talbot Docker Environment
+
+**To build the image:**
+>`docker build --no-cache -t talbot .`
+
+**To create the container:**
+>`docker run -it --name talbot -v ./:/talbot -w /talbot talbot`
+
+**To reconnect to the container:**
+>`docker exec -it talbot /bin/bash`
+
+**To stop the container:**
+>`docker stop talbot`
+
+**To remove the image:**
+>`docker rmi talbot`
+
+**To remove the container:**
+>`docker rm talbot`
