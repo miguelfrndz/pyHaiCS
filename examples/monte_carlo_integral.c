@@ -48,11 +48,13 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                     #endif
 
                     double integrand_value;
-                    if (u < 1e-3) {
-                        integrand_value = sin(omega * (tau - t)) * kn_half;
+                    // double sin_term = sin(omega * (tau - t));
+                    double sin_term = (cos(omega * t) * sin(omega * tau) - sin(omega * t) * cos(omega * tau));
+                    if (u < 1e-6) {
+                        integrand_value = sin_term * kn_half;
                     } else {
-                        integrand_value = sin(omega * (tau - t)) * gsl_sf_bessel_J1(kn * u) / u;
-                        // integrand_value = sin(omega * (tau - t)) * asymptotic_j1(kn * u) / u;
+                        integrand_value = sin_term * gsl_sf_bessel_J1(kn * u) / u;
+                        // integrand_value = sin_term * asymptotic_j1(kn * u) / u;
                     }
                     #ifdef DEBUG
                         printf("integrand_value = %f, kn = %f, Bessel-J1 = %f\n", integrand_value, kn, gsl_sf_bessel_J1(kn * u));
