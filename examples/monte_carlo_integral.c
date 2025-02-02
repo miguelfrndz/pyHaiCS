@@ -8,6 +8,9 @@
 #include <time.h>
 
 #define ASYMPTOTIC_TOLERANCE 1e-6
+#define ROUNDING_CORRECTION 1e2
+#define EPS_ABS 1e-7
+#define EPS_REL 1e-4
 #define LIMIT 100000
 #define SOLVING_MODE_MC 1
 #define SOLVING_MODE_GSL 2
@@ -30,12 +33,12 @@ static double gsl_integrand(double tau, void *params_void) {
     double kn_half  = params->kn_half;
     double tau_sq   = tau * tau;
     double u        = sqrt(fmax(tau_sq - z * z, 0.0));
-    double sin_term = (cos(omega * t) * sin(omega * tau) - sin(omega * t) * cos(omega * tau));
+    double sin_term = (sin(omega * t) * cos(omega * tau) - cos(omega * t) * sin(omega * tau));
     
     if(u < ASYMPTOTIC_TOLERANCE)
-        return sin_term * kn_half;
+        return sin_term * kn_half * ROUNDING_CORRECTION;
     else
-        return sin_term * gsl_sf_bessel_J1(kn * u) / u;
+        return sin_term * gsl_sf_bessel_J1(kn * u) / u * ROUNDING_CORRECTION;
 }
 
 
@@ -94,17 +97,17 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
 
                         double integrand_value;
                         // double sin_term = sin(omega * (tau - t));
-                        double sin_term = (cos(omega * t) * sin(omega * tau) - sin(omega * t) * cos(omega * tau));
+                        double sin_term = (sin(omega * t) * cos(omega * tau) - cos(omega * t) * sin(omega * tau));
                         if (u < ASYMPTOTIC_TOLERANCE) {
-                            integrand_value = sin_term * kn_half;
+                            integrand_value = sin_term * kn_half * ROUNDING_CORRECTION;
                         } else {
-                            integrand_value = sin_term * gsl_sf_bessel_J1(kn * u) / u;
-                            // integrand_value = sin_term * asymptotic_j1(kn * u) / u;
+                            integrand_value = sin_term * gsl_sf_bessel_J1(kn * u) / u * ROUNDING_CORRECTION;
+                            // integrand_value = sin_term * asymptotic_j1(kn * u) / u * ROUNDING_CORRECTION;
                         }
                         #ifdef DEBUG
                             printf("integrand_value = %f, kn = %f, Bessel-J1 = %f\n", integrand_value, kn, gsl_sf_bessel_J1(kn * u));
                         #endif
-                        sum += integrand_value;
+                        sum += integrand_value / ROUNDING_CORRECTION;
                     }
 
                     integral[n * N_t * N_z + i * N_z + j] = range * (sum / MC_samples);
@@ -126,7 +129,7 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                     gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1e5);
                     gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1e5);
                     
-                    int status_qag = gsl_integration_qag(&F, min_x, max_x, 1e-6, 1e-3, 
+                    int status_qag = gsl_integration_qag(&F, min_x, max_x, EPS_ABS, EPS_REL, 
                                             LIMIT, GSL_INTEG_GAUSS41, 
                                             workspace_qag, &result, &error);
 
@@ -135,14 +138,14 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                         #ifdef DEBUG
                             printf("QAG failed. Trying CQUAD...\n");
                         #endif
-                        gsl_integration_cquad(&F, min_x, max_x, 1e-6, 1e-3, 
+                        gsl_integration_cquad(&F, min_x, max_x, EPS_ABS, EPS_REL,
                                             workspace_cquad, &result, &error, NULL);
                     }
 
                     gsl_integration_workspace_free(workspace_qag);
                     gsl_integration_cquad_workspace_free(workspace_cquad);
 
-                    integral[n * N_t * N_z + i * N_z + j] = result;
+                    integral[n * N_t * N_z + i * N_z + j] = result / ROUNDING_CORRECTION;
                 #endif
                 }
         }
