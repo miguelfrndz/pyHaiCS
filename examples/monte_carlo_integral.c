@@ -15,6 +15,7 @@
 #define SOLVING_MODE_MC 1
 #define SOLVING_MODE_GSL 2
 #define SOLVING_MODE SOLVING_MODE_GSL
+#define SPLIT_INTEGRAL
 
 typedef struct {
     double omega;
@@ -23,6 +24,40 @@ typedef struct {
     double kn;
     double kn_half;
 } integration_params;
+
+static double gsl_integrand_cos(double tau, void *params_void) {
+    integration_params *params = (integration_params*) params_void;
+    double omega    = params->omega;
+    double t        = params->t;
+    double z        = params->z;
+    double kn       = params->kn;
+    double kn_half  = params->kn_half;
+    double tau_sq   = tau * tau;
+    double u        = sqrt(fmax(tau_sq - z * z, 0.0));
+    double cos_term = cos(omega * tau);
+    
+    if(u < ASYMPTOTIC_TOLERANCE)
+        return cos_term * kn_half * ROUNDING_CORRECTION;
+    else
+        return cos_term * gsl_sf_bessel_J0(kn * u) / u * ROUNDING_CORRECTION;
+}
+
+static double gsl_integrand_sin(double tau, void *params_void) {
+    integration_params *params = (integration_params*) params_void;
+    double omega    = params->omega;
+    double t        = params->t;
+    double z        = params->z;
+    double kn       = params->kn;
+    double kn_half  = params->kn_half;
+    double tau_sq   = tau * tau;
+    double u        = sqrt(fmax(tau_sq - z * z, 0.0));
+    double sin_term = sin(omega * tau);
+    
+    if(u < ASYMPTOTIC_TOLERANCE)
+        return sin_term * kn_half * ROUNDING_CORRECTION;
+    else
+        return sin_term * gsl_sf_bessel_J1(kn * u) / u * ROUNDING_CORRECTION;
+}
 
 static double gsl_integrand(double tau, void *params_void) {
     integration_params *params = (integration_params*) params_void;
@@ -55,7 +90,7 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
         printf(">>> Using Monte Carlo Integration.\n");
     #elif SOLVING_MODE == SOLVING_MODE_GSL
         printf(">>> Using GSL Integration.\n");
-        // gsl_set_error_handler_off();
+        gsl_set_error_handler_off();
     #endif
     for (int n = 0; n < N_max; n++) {
         double kn = k_n_values[n];
@@ -122,6 +157,14 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                     gsl_function F;
                     F.function = &gsl_integrand;
                     F.params   = &params;
+
+                    gsl_function F_cos;
+                    F_cos.function = &gsl_integrand_cos;
+                    F_cos.params   = &params;
+
+                    gsl_function F_sin;
+                    F_sin.function = &gsl_integrand_sin;
+                    F_sin.params   = &params;
                     
                     double result, error;
                     // gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1024*1024*16);
@@ -129,18 +172,47 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                     gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1e5);
                     gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1e5);
                     
-                    int status_qag = gsl_integration_qag(&F, min_x, max_x, EPS_ABS, EPS_REL, 
-                                            LIMIT, GSL_INTEG_GAUSS41, 
-                                            workspace_qag, &result, &error);
+                    #ifdef SPLIT_INTEGRAL
+                        double result_cos, result_sin, error_cos, error_sin;
+                        int status_qag_cos = gsl_integration_qag(&F_cos, min_x, max_x, EPS_ABS, EPS_REL, 
+                                                LIMIT, GSL_INTEG_GAUSS41, 
+                                                workspace_qag, &result_cos, &error_cos);
+                        int status_qag_sin = gsl_integration_qag(&F_sin, min_x, max_x, EPS_ABS, EPS_REL, 
+                                                LIMIT, GSL_INTEG_GAUSS41, 
+                                                workspace_qag, &result_sin, &error_sin);
 
-                    // If QAG fails, try CQUAD
-                    if (status_qag){
-                        #ifdef DEBUG
-                            printf("QAG failed. Trying CQUAD...\n");
-                        #endif
-                        gsl_integration_cquad(&F, min_x, max_x, EPS_ABS, EPS_REL,
-                                            workspace_cquad, &result, &error, NULL);
-                    }
+                        // If QAG fails, try CQUAD
+                        if (status_qag_cos){
+                            #ifdef DEBUG
+                                printf("QAG for cos term failed. Trying CQUAD...\n");
+                            #endif
+                            gsl_integration_cquad(&F_cos, min_x, max_x, EPS_ABS, EPS_REL,
+                                                workspace_cquad, &result_cos, &error_cos, NULL);
+                        }
+
+                        if (status_qag_sin){
+                            #ifdef DEBUG
+                                printf("QAG for sin term failed. Trying CQUAD...\n");
+                            #endif
+                            gsl_integration_cquad(&F_sin, min_x, max_x, EPS_ABS, EPS_REL,
+                                                workspace_cquad, &result_sin, &error_sin, NULL);
+                        }
+
+                        result = sin(omega * t) * (result_cos) - cos(omega * t) * (result_sin);
+                    #else
+                        int status_qag = gsl_integration_qag(&F, min_x, max_x, EPS_ABS, EPS_REL, 
+                                                LIMIT, GSL_INTEG_GAUSS41, 
+                                                workspace_qag, &result, &error);
+
+                        // If QAG fails, try CQUAD
+                        if (status_qag){
+                            #ifdef DEBUG
+                                printf("QAG failed. Trying CQUAD...\n");
+                            #endif
+                            gsl_integration_cquad(&F, min_x, max_x, EPS_ABS, EPS_REL,
+                                                workspace_cquad, &result, &error, NULL);
+                        }
+                    #endif
 
                     gsl_integration_workspace_free(workspace_qag);
                     gsl_integration_cquad_workspace_free(workspace_cquad);
