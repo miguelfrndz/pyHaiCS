@@ -39,7 +39,7 @@ static double gsl_integrand_cos(double tau, void *params_void) {
     if(u < ASYMPTOTIC_TOLERANCE)
         return cos_term * kn_half * ROUNDING_CORRECTION;
     else
-        return cos_term * gsl_sf_bessel_J0(kn * u) / u * ROUNDING_CORRECTION;
+        return cos_term * gsl_sf_bessel_J1(kn * u) / u * ROUNDING_CORRECTION;
 }
 
 static double gsl_integrand_sin(double tau, void *params_void) {
@@ -154,32 +154,27 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                     params.kn       = kn;
                     params.kn_half  = kn_half;
                     
-                    gsl_function F;
-                    F.function = &gsl_integrand;
-                    F.params   = &params;
-
-                    gsl_function F_cos;
-                    F_cos.function = &gsl_integrand_cos;
-                    F_cos.params   = &params;
-
-                    gsl_function F_sin;
-                    F_sin.function = &gsl_integrand_sin;
-                    F_sin.params   = &params;
-                    
-                    double result, error;
-                    // gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1024*1024*16);
-                    // gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1024*1024*16);
-                    gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1e5);
-                    gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1e5);
-                    
                     #ifdef SPLIT_INTEGRAL
+                        gsl_function F_cos;
+                        F_cos.function = &gsl_integrand_cos;
+                        F_cos.params   = &params;
+
+                        gsl_function F_sin;
+                        F_sin.function = &gsl_integrand_sin;
+                        F_sin.params   = &params;
+
                         double result_cos, result_sin, error_cos, error_sin;
+                        gsl_integration_workspace *workspace_qag_cos = gsl_integration_workspace_alloc(1e5);
+                        gsl_integration_workspace *workspace_qag_sin = gsl_integration_workspace_alloc(1e5);
+                        gsl_integration_cquad_workspace *workspace_cquad_cos = gsl_integration_cquad_workspace_alloc(1e5);
+                        gsl_integration_cquad_workspace *workspace_cquad_sin = gsl_integration_cquad_workspace_alloc(1e5);
+
                         int status_qag_cos = gsl_integration_qag(&F_cos, min_x, max_x, EPS_ABS, EPS_REL, 
                                                 LIMIT, GSL_INTEG_GAUSS41, 
-                                                workspace_qag, &result_cos, &error_cos);
+                                                workspace_qag_cos, &result_cos, &error_cos);
                         int status_qag_sin = gsl_integration_qag(&F_sin, min_x, max_x, EPS_ABS, EPS_REL, 
                                                 LIMIT, GSL_INTEG_GAUSS41, 
-                                                workspace_qag, &result_sin, &error_sin);
+                                                workspace_qag_sin, &result_sin, &error_sin);
 
                         // If QAG fails, try CQUAD
                         if (status_qag_cos){
@@ -187,7 +182,7 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                                 printf("QAG for cos term failed. Trying CQUAD...\n");
                             #endif
                             gsl_integration_cquad(&F_cos, min_x, max_x, EPS_ABS, EPS_REL,
-                                                workspace_cquad, &result_cos, &error_cos, NULL);
+                                                workspace_cquad_cos, &result_cos, &error_cos, NULL);
                         }
 
                         if (status_qag_sin){
@@ -195,11 +190,23 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                                 printf("QAG for sin term failed. Trying CQUAD...\n");
                             #endif
                             gsl_integration_cquad(&F_sin, min_x, max_x, EPS_ABS, EPS_REL,
-                                                workspace_cquad, &result_sin, &error_sin, NULL);
+                                                workspace_cquad_sin, &result_sin, &error_sin, NULL);
                         }
 
-                        result = sin(omega * t) * (result_cos) - cos(omega * t) * (result_sin);
+                        double result = sin(omega * t) * (result_cos) - cos(omega * t) * (result_sin);
+
+                        gsl_integration_workspace_free(workspace_qag_cos);
+                        gsl_integration_workspace_free(workspace_qag_sin);
+                        gsl_integration_cquad_workspace_free(workspace_cquad_cos);
+                        gsl_integration_cquad_workspace_free(workspace_cquad_sin);
                     #else
+                        gsl_function F;
+                        F.function = &gsl_integrand;
+                        F.params   = &params;
+                        
+                        double result, error;
+                        gsl_integration_workspace *workspace_qag = gsl_integration_workspace_alloc(1e5);
+                        gsl_integration_cquad_workspace *workspace_cquad = gsl_integration_cquad_workspace_alloc(1e5);
                         int status_qag = gsl_integration_qag(&F, min_x, max_x, EPS_ABS, EPS_REL, 
                                                 LIMIT, GSL_INTEG_GAUSS41, 
                                                 workspace_qag, &result, &error);
@@ -212,14 +219,13 @@ void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_value
                             gsl_integration_cquad(&F, min_x, max_x, EPS_ABS, EPS_REL,
                                                 workspace_cquad, &result, &error, NULL);
                         }
+                        gsl_integration_workspace_free(workspace_qag);
+                        gsl_integration_cquad_workspace_free(workspace_cquad);
                     #endif
-
-                    gsl_integration_workspace_free(workspace_qag);
-                    gsl_integration_cquad_workspace_free(workspace_cquad);
 
                     integral[n * N_t * N_z + i * N_z + j] = result / ROUNDING_CORRECTION;
                 #endif
-                }
+            }
         }
     }
 }
