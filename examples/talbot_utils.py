@@ -28,7 +28,7 @@ if USE_C_VERSION:
 def integrand(tau, kn, t, z, omega, epsilon=1e-3):
     u = jnp.sqrt(jnp.maximum(0, tau ** 2 - z ** 2))
     mask = u < epsilon
-    result = jnp.where(mask, jnp.sin(omega * (tau - t)) * kn * 1/2, jnp.sin(omega * (tau - t)) * J1(kn * u) / u)
+    result = jnp.where(mask, jnp.sin(omega * (t - tau)) * kn * 1/2, jnp.sin(omega * (t - tau)) * J1(kn * u) / u)
     return result
 
 def g_n_rect_delta(n, config):
