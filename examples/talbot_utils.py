@@ -24,6 +24,19 @@ if USE_C_VERSION:
         ctypes.c_double, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_double)
     ]
 
+    # Utility function
+    int_t = ctypes.c_int
+    double_t = ctypes.c_double
+    ptr_t = ctypes.POINTER(double_t)
+    ptr = lambda array: array.ctypes.data_as(ptr_t)
+
+    lib.compute_integrals.argtypes = [
+        ptr_t, ptr_t, ptr_t, ptr_t, ptr_t, ptr_t, ptr_t,
+        int_t, int_t, int_t, int_t,
+        double_t, double_t, double_t, double_t
+    ]
+    lib.compute_integrals.restype = None
+
 @jax.jit
 def integrand(tau, kn, t, z, omega, epsilon=1e-3):
     u = jnp.sqrt(jnp.maximum(0, tau ** 2 - z ** 2))
@@ -98,21 +111,45 @@ def perform_integrals(config):
     # Prealocate the result arrays
     integral = np.zeros((len(n_values), len(t_values), len(z_values)), dtype = np.float64)
 
+    partial_integral_sin = np.zeros((len(n_values),len(t_values),len(z_values)))
+    partial_integral_cos = np.zeros((len(n_values),len(t_values),len(z_values)))
+
     if USE_C_VERSION:
         # Call C function
-        lib.monte_carlo_integrate(
-            n_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            k_n_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            t_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            z_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            x_min.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            x_max.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            ctypes.c_double(config.omega),
-            ctypes.c_int(len(n_values)), ctypes.c_int(len(t_values)), ctypes.c_int(len(z_values)),
-            ctypes.c_int(config.mc_samples), integral.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+        # lib.monte_carlo_integrate(
+        #     n_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        #     k_n_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        #     t_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        #     z_values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        #     x_min.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        #     x_max.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        #     ctypes.c_double(config.omega),
+        #     ctypes.c_int(len(n_values)), ctypes.c_int(len(t_values)), ctypes.c_int(len(z_values)),
+        #     ctypes.c_int(config.mc_samples), integral.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+        # )
+
+        # result = np.cumsum(integral, axis = 1)
+        lib.compute_integrals(
+            ptr(partial_integral_cos), ptr(partial_integral_sin), ptr(x_min), ptr(x_max), 
+            ptr(k_n_values), ptr(t_values), ptr(z_values), 
+            len(n_values), len(t_values), len(z_values), 
+            100_000, 1e-7, 1e-4, config.omega, 1e-6
         )
 
-        result = np.cumsum(integral, axis = 1)
+        # Initialize the result array
+        resummed_integral_sin = np.empty((len(n_values), len(t_values), len(z_values)))
+        resummed_integral_cos = np.empty((len(n_values), len(t_values), len(z_values)))
+
+        # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
+        resummed_integral_sin[:, :, :] = np.cumsum(partial_integral_sin[:, :, :], axis=1)
+        resummed_integral_cos[:, :, :] = np.cumsum(partial_integral_cos[:, :, :], axis=1)
+
+
+        # Initialize the result array
+        result = np.empty((len(n_values), len(t_values), len(z_values)))
+        result = np.sin(config.omega * t_values[None,:,None]) * resummed_integral_cos \
+            - np.cos(config.omega * t_values[None,:,None]) * resummed_integral_sin # sin(tau-t) = cos(t)sin(tau) - sin(t)cos(tau)
+
     else:
         # Perform the integrals
         for n in tqdm(range(len(n_values))):

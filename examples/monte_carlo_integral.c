@@ -81,6 +81,98 @@ static double asymptotic_j1(double x) {
     return sqrt(2.0 / (M_PI * x)) * cos(x - 3.0 * M_PI_4);
 }
 
+double integrand_sin(double tau, void* generic_params)
+{
+    const double* params = (double*)generic_params;
+    const double k = params[0];
+    const double t = params[1];
+    const double z = params[2];
+    const double omega = params[3];
+    const double epsilon = params[4];
+
+    const double u = sqrt(fmax(0.0, tau*tau - z*z)); // Precompute this part. The np.maximum avoids sqrt(-x) operations.
+
+    if(u < epsilon)
+        return sin(omega * tau) * k * 0.5 * 100.; // We use the Taylor expansion of J1(x) to avoid divisions by 0. 
+    else
+        return sin(omega * tau) * gsl_sf_bessel_J1(k * u) / u * 100.;
+}
+
+// We multiply the integrand by 100 and then divide the end result by 100 to mitigate roundoff errors
+double integrand_cos(double tau, void* generic_params) {
+    const double* params = (double*)generic_params;
+    const double k = params[0];
+    const double t = params[1];
+    const double z = params[2];
+    const double omega = params[3];
+    const double epsilon = params[4];
+
+    const double u = sqrt(fmax(0.0, tau*tau - z*z)); // Precompute this part. The np.maximum avoids sqrt(-x) operations.
+    
+    if(u < epsilon)
+        return cos(omega * tau) * k * 0.5 * 100.; // We use the Taylor expansion of J1(x) to avoid divisions by 0. 
+    else
+        return cos(omega * tau) * gsl_sf_bessel_J1(k * u) / u * 100.;
+}
+
+void compute_integrals(double* partial_integral_cos, double* partial_integral_sin, double* x_min, double* x_max, 
+                        double* k_n_values, double* t_values, double* z_values, 
+                        int n_size, int t_size, int z_size, 
+                        int limit, double epsabs, double epsrel, 
+                        double omega, double epsilon) {
+    #pragma omp parallel for collapse(2) schedule(dynamic)
+    for (int n = 0; n < n_size; ++n) {
+        for (int t = 0; t < t_size; ++t) {
+            if (t == t_size - 1) {
+                printf("Running Iteration for n = %d...\n", (n + 1));
+            }
+            
+            gsl_integration_workspace* workspace = gsl_integration_workspace_alloc(1024*1024*8);
+            gsl_integration_cquad_workspace* workspace_cquad = gsl_integration_cquad_workspace_alloc(1024*1024*2);
+
+            double err [[maybe_unused]];
+            double params[5];
+
+            gsl_function func_cos;
+            func_cos.function = &integrand_cos;
+            func_cos.params = &params;
+
+            gsl_function func_sin;
+            func_sin.function = &integrand_sin;
+            func_sin.params = &params;
+
+            params[0] = k_n_values[n];
+            params[1] = t_values[t];
+            params[3] = omega;
+            params[4] = epsilon;
+
+            for (int z = 0; z < z_size; ++z)
+            {
+                params[2] = z_values[z];
+
+                gsl_integration_qag(&func_cos, x_min[t*z_size+z], x_max[t*z_size+z], 
+                                 epsabs, epsrel, limit, 4, workspace, 
+                                 &partial_integral_cos[(n*t_size+t)*z_size+z], &err);
+                    
+                gsl_integration_qag(&func_sin, x_min[t*z_size+z], x_max[t*z_size+z], 
+                                 epsabs, epsrel, limit, 4, workspace, 
+                                 &partial_integral_sin[(n*t_size+t)*z_size+z], &err);
+
+
+                // We multiply the integrand by 100 and then divide the end result by 100 to mitigate roundoff errors
+                partial_integral_cos[(n*t_size+t)*z_size+z] /= 100.;
+                partial_integral_sin[(n*t_size+t)*z_size+z] /= 100.;
+
+            }
+
+            // We free the memory
+            gsl_integration_workspace_free(workspace);
+            gsl_integration_cquad_workspace_free(workspace_cquad);
+        }
+    }
+}
+
+
 void monte_carlo_integrate(double *n_values, double *k_n_values, double *t_values, double *z_values, 
                            double *x_min, double *x_max, double omega, int N_max, int N_t, int N_z, 
                            int MC_samples, double *integral) {
