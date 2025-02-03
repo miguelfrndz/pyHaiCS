@@ -11,6 +11,7 @@ import pyHaiCS as haics
 import ctypes
 
 USE_C_VERSION = True
+ROUNDING_CORRECTION = 1e2
 
 if USE_C_VERSION:
     # Load the compiled C shared library
@@ -29,10 +30,19 @@ if USE_C_VERSION:
     lib.compute_integrals.restype = None
 
 @jax.jit
-def integrand(tau, kn, t, z, omega, epsilon=1e-3):
+def integrand_sin(tau, kn, z, omega, epsilon = 1e-6):
     u = jnp.sqrt(jnp.maximum(0, tau ** 2 - z ** 2))
+    sin_term = jnp.sin(omega * tau)
     mask = u < epsilon
-    result = jnp.where(mask, jnp.sin(omega * (t - tau)) * kn * 1/2, jnp.sin(omega * (t - tau)) * J1(kn * u) / u)
+    result = jnp.where(mask, sin_term * kn * 1/2 * ROUNDING_CORRECTION, sin_term * J1(kn * u) / u * ROUNDING_CORRECTION)
+    return result
+
+@jax.jit
+def integrand_cos(tau, kn, z, omega, epsilon = 1e-6):
+    u = jnp.sqrt(jnp.maximum(0, tau ** 2 - z ** 2))
+    cos_term = jnp.cos(omega * tau)
+    mask = u < epsilon
+    result = jnp.where(mask, cos_term * kn * 1/2 * ROUNDING_CORRECTION, cos_term * J1(kn * u) / u * ROUNDING_CORRECTION)
     return result
 
 def g_n_rect_delta(n, config):
@@ -112,21 +122,6 @@ def perform_integrals(config):
             ptr(k_n_values), ptr(t_values), ptr(z_values), 
             len(n_values), len(t_values), len(z_values), config.omega, config.mc_samples
         )
-
-        # Initialize the result array
-        resummed_integral_sin = np.empty((len(n_values), len(t_values), len(z_values)))
-        resummed_integral_cos = np.empty((len(n_values), len(t_values), len(z_values)))
-
-        # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
-        resummed_integral_sin[:, :, :] = np.cumsum(partial_integral_sin[:, :, :], axis=1)
-        resummed_integral_cos[:, :, :] = np.cumsum(partial_integral_cos[:, :, :], axis=1)
-
-
-        # Initialize the result array
-        result = np.empty((len(n_values), len(t_values), len(z_values)))
-        result = np.sin(config.omega * t_values[None,:,None]) * resummed_integral_cos \
-            - np.cos(config.omega * t_values[None,:,None]) * resummed_integral_sin # sin(tau-t) = cos(t)sin(tau) - sin(t)cos(tau)
-
     else:
         # Perform the integrals
         for n in tqdm(range(len(n_values))):
@@ -134,15 +129,27 @@ def perform_integrals(config):
                 for j in range(len(z_values)):
                     # Monte Carlo integration
                     samples = np.random.uniform(x_min[i, j], x_max[i, j], config.mc_samples)
-                    integrand_values = integrand(samples, k_n_values[n], t_values[i], z_values[j], config.omega)
-                    integral[n, i, j] = (x_max[i, j] - x_min[i, j]) * np.mean(integrand_values)
+                    integrand_sin_values = integrand_sin(samples, k_n_values[n], t_values[i], z_values[j], config.omega)
+                    integrand_cos_values = integrand_cos(samples, k_n_values[n], t_values[i], z_values[j], config.omega)
+                    partial_integral_sin[n, i, j] = np.mean(integrand_sin_values)
+                    partial_integral_cos[n, i, j] = np.mean(integrand_cos_values)
+                    partial_integral_sin[n, i, j] *= x_max[i, j] - x_min[i, j]
+                    partial_integral_cos[n, i, j] *= x_max[i, j] - x_min[i, j]
+                    partial_integral_sin[n, i, j] /= ROUNDING_CORRECTION
+                    partial_integral_cos[n, i, j] /= ROUNDING_CORRECTION
+    # Initialize the result array
+    resummed_integral_sin = np.empty((len(n_values), len(t_values), len(z_values)))
+    resummed_integral_cos = np.empty((len(n_values), len(t_values), len(z_values)))
 
-        # Initialize the result array
-        result = np.empty((len(n_values), len(t_values), len(z_values)))
+    # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
+    resummed_integral_sin[:, :, :] = np.cumsum(partial_integral_sin[:, :, :], axis=1)
+    resummed_integral_cos[:, :, :] = np.cumsum(partial_integral_cos[:, :, :], axis=1)
 
-        # Vectorized cumulative sum along the 't' axis (axis=1) to recover the full integrals
-        result[:, :, :] = np.cumsum(integral[:, :, :], axis = 1)
 
+    # Initialize the result array
+    result = np.empty((len(n_values), len(t_values), len(z_values)))
+    result = np.sin(config.omega * t_values[None,:,None]) * resummed_integral_cos \
+                - np.cos(config.omega * t_values[None,:,None]) * resummed_integral_sin # sin(tau-t) = cos(t)sin(tau) - sin(t)cos(tau)
     return result
 
 def generate_coeffs(config):
