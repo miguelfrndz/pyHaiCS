@@ -67,7 +67,7 @@ class TalbotConfig:
         self.delta_z = self.z_T/self.N_z # Z-Distance between points
 
         # Parameters for the Monte-Carlo simulation
-        self.mc_samples = 50_000 # Number of samples for the Monte-Carlo simulation
+        self.mc_samples = 5_000 # Number of samples for the Monte-Carlo simulation
 
     def __str__(self):
         params = {

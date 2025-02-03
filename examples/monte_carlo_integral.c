@@ -14,7 +14,7 @@
 #define LIMIT 100000
 #define SOLVING_MODE_MC 1
 #define SOLVING_MODE_GSL 2
-#define SOLVING_MODE SOLVING_MODE_MC
+#define SOLVING_MODE SOLVING_MODE_GSL
 #define GSL_ALLOC_SIZE 1024*1024*8
 
 typedef struct {
@@ -29,7 +29,7 @@ static double asymptotic_j1(double x) {
     return sqrt(2.0 / (M_PI * x)) * cos(x - 3.0 * M_PI_4);
 }
 
-double integrand_sin(double tau, void* params_void) {
+static inline double integrand_sin(double tau, void* params_void) {
     integration_params *params = (integration_params*) params_void;
     double omega    = params->omega;
     double t        = params->t;
@@ -46,7 +46,7 @@ double integrand_sin(double tau, void* params_void) {
         return sin_term * gsl_sf_bessel_J1(kn * u) / u * ROUNDING_CORRECTION;
 }
 
-double integrand_cos(double tau, void* params_void) {
+static inline double integrand_cos(double tau, void* params_void) {
     integration_params *params = (integration_params*) params_void;
     double omega    = params->omega;
     double t        = params->t;
@@ -76,7 +76,7 @@ void compute_integrals(double* partial_integral_cos, double* partial_integral_si
     #pragma omp parallel for collapse(2) schedule(dynamic)
     for (int n = 0; n < n_size; ++n) {
         for (int i = 0; i < t_size; ++i) {
-            if (i == t_size - 1) {
+            if (i == 0) {
                 printf("Running Iteration for n = %d...\n", (n + 1));
             }
 
