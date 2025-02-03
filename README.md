@@ -37,19 +37,31 @@ The following samplers have been implemented in `pyHaiCS`:
 ## Instructions to Run the Talbot Docker Environment
 
 **To build the image:**
->`docker build --no-cache -t talbot .`
+```bash
+docker build --no-cache -t talbot .
+```
 
 **To create the container:**
->`docker run -it --name talbot -v ./:/talbot -w /talbot talbot`
+```bash
+docker run -it --name talbot -v ./:/talbot -w /talbot talbot
+```
 
 **To reconnect to the container:**
->`docker exec -it talbot /bin/bash`
+```bash
+docker exec -it talbot /bin/bash
+```
 
 **To stop the container:**
->`docker stop talbot`
+```bash
+docker stop talbot
+```
 
 **To remove the image:**
->`docker rmi talbot`
+```bash
+docker rmi talbot
+```
 
 **To remove the container:**
->`docker rm talbot`
+```bash
+docker rm talbot
+```
