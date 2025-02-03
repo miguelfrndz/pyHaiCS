@@ -14,7 +14,7 @@
 #define LIMIT 100000
 #define SOLVING_MODE_MC 1
 #define SOLVING_MODE_GSL 2
-#define SOLVING_MODE SOLVING_MODE_GSL
+#define SOLVING_MODE SOLVING_MODE_MC
 #define GSL_ALLOC_SIZE 1024*1024*8
 
 typedef struct {
@@ -64,11 +64,11 @@ double integrand_cos(double tau, void* params_void) {
 
 void compute_integrals(double* partial_integral_cos, double* partial_integral_sin, double* x_min, 
                         double* x_max, double* k_n_values, double* t_values, double* z_values, 
-                        int n_size, int t_size, int z_size, double omega) {
+                        int n_size, int t_size, int z_size, double omega, int MC_SAMPLES) {
     // srand(time(NULL)); // Seed the random number generator
     unsigned int base_seed = (unsigned int)time(NULL);
     #if SOLVING_MODE == SOLVING_MODE_MC
-        printf(">>> Using Monte Carlo Integration.\n");
+        printf(">>> Using Monte Carlo Integration (w/ %d MC-Samples).\n", MC_SAMPLES);
     #elif SOLVING_MODE == SOLVING_MODE_GSL
         printf(">>> Using GSL Integration.\n");
         gsl_set_error_handler_off();
@@ -83,16 +83,39 @@ void compute_integrals(double* partial_integral_cos, double* partial_integral_si
             double kn = k_n_values[n];
             double kn_half = 0.5 * kn;
             double t = t_values[i];
+
+            integration_params params;
+            params.omega = omega;
+            params.t = t;
+            params.kn = kn;
+            params.kn_half = kn_half;
             
             #if SOLVING_MODE == SOLVING_MODE_MC
-                // TODO: Implement this
+                for (int j = 0; j < z_size; ++j) {
+                    params.z = z_values[j];
+                    double min = x_min[i*z_size+j];
+                    double max = x_max[i*z_size+j];
+                    double range = max - min;
+                    int _index = (n*t_size+i)*z_size+j;
+                    unsigned int thread_seed = base_seed + _index + omp_get_thread_num();
+
+                    double sum_cos = 0.0;
+                    double sum_sin = 0.0;
+
+                    #pragma omp parallel for reduction(+:sum_cos, sum_sin) schedule(dynamic)
+                    for (int k = 0; k < MC_SAMPLES; ++k) {
+                        double tau = min + range * ((double)rand_r(&thread_seed) / RAND_MAX);
+                        sum_cos += integrand_cos(tau, &params);
+                        sum_sin += integrand_sin(tau, &params);
+                    }
+
+                    partial_integral_cos[_index] = range * sum_cos / MC_SAMPLES;
+                    partial_integral_sin[_index] = range * sum_sin / MC_SAMPLES;
+
+                    partial_integral_cos[_index] /= ROUNDING_CORRECTION;
+                    partial_integral_sin[_index] /= ROUNDING_CORRECTION;
+                }
             #elif SOLVING_MODE == SOLVING_MODE_GSL
-                integration_params params;
-                params.omega = omega;
-                params.t = t;
-                params.kn = kn;
-                params.kn_half = kn_half;
-                
                 gsl_integration_workspace* workspace = gsl_integration_workspace_alloc(GSL_ALLOC_SIZE);
                 gsl_integration_cquad_workspace* workspace_cquad = gsl_integration_cquad_workspace_alloc(GSL_ALLOC_SIZE);
 

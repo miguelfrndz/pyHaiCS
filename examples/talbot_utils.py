@@ -24,7 +24,7 @@ if USE_C_VERSION:
 
     lib.compute_integrals.argtypes = [
         ptr_t, ptr_t, ptr_t, ptr_t, ptr_t, ptr_t, 
-        ptr_t, int_t, int_t, int_t, double_t,
+        ptr_t, int_t, int_t, int_t, double_t, int_t
     ]
     lib.compute_integrals.restype = None
 
@@ -110,7 +110,7 @@ def perform_integrals(config):
         lib.compute_integrals(
             ptr(partial_integral_cos), ptr(partial_integral_sin), ptr(x_min), ptr(x_max), 
             ptr(k_n_values), ptr(t_values), ptr(z_values), 
-            len(n_values), len(t_values), len(z_values), config.omega
+            len(n_values), len(t_values), len(z_values), config.omega, config.mc_samples
         )
 
         # Initialize the result array
