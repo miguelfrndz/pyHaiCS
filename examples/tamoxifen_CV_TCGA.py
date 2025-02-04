@@ -23,8 +23,8 @@ def load_data(dataset) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     Load the data from the specified dataset.
     """
     if dataset == 'TCGA':
-        X = np.loadtxt('cancer_data/X_data_TCGA.txt', delimiter = ',')
-        y = np.loadtxt('cancer_data/Y_data_TCGA.txt', delimiter = ',')
+        X = np.loadtxt('cancer_data/X_data.txt', delimiter = ',')
+        y = np.loadtxt('cancer_data/Y_data.txt', delimiter = ',')
     elif dataset == 'METABRIC':
         data = pd.read_csv('cancer_data/patients_metabric.csv')
         X, y = data.iloc[:, 1:-1].values, data.iloc[:, -1].values
@@ -128,6 +128,19 @@ for train_index, test_index in splitter.split(X, y):
                             integrator = haics.integrators.VerletIntegrator(), 
                             RNG_key = 120)
     
+    # GHMC w/s-AIA adaptive scheme for posterior sampling
+    # params_samples = haics.samplers.hamiltonian.sAIA(params,
+    #                         potential_args = (X_train, y_train),
+    #                         n_samples_tune = 1000, 
+    #                         n_samples_check = 200,
+    #                         n_samples_burn_in = 2000,
+    #                         n_samples_prod = 5000,
+    #                         potential = neg_log_posterior_fn,
+    #                         mass_matrix = jnp.eye(X_train.shape[1]),
+    #                         target_AR = 0.92, stage = 2, 
+    #                         sensibility = 0.01, delta_step = 0.01, 
+    #                         compute_freqs = True, sampler = "GHMC", RNG_key = 42)
+    
     # HMC w/s-AIA adaptive scheme for posterior sampling
     # params_samples = haics.samplers.hamiltonian.sAIA(params,
     #                         potential_args = (X_train, y_train),
@@ -159,7 +172,7 @@ for train_index, test_index in splitter.split(X, y):
     ############################################################
     # haics.utils.metrics.compute_metrics(params_samples, thres_estimator = 'var_trunc', normalize_ESS = True)
 
-    # Average across chains (remove for s-AIA w/HMC)
+    # Average across chains (remove for s-AIA w/HMC or GHMC)
     params_samples = jnp.mean(params_samples, axis = 0)
 
     # Make predictions using the samples
