@@ -514,6 +514,7 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     # Step 1: Tuning Stage
     print("1) Tuning Stage...")
     n_samples, step_size, n_steps, integrator = n_samples_tune, 1/x_init.shape[0], 1, VerletIntegrator()
+    momentum_noise_lower, momentum_noise_upper = None, None
     if sampler == "GHMC":
         if stage == 2: a, b = 0, 1/4
         elif stage == 3: a, b = 1/3, 1/6
