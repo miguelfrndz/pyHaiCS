@@ -27,7 +27,7 @@ def Hamiltonian(x, p, potential, mass_matrix):
     Parameters:
         x (jax.Array): position
         p (jax.Array): momentum
-        potential_grad (function): potential gradient
+        potential (function): Hamiltonian potential
         mass_matrix (jax.Array): mass matrix
     -------------------------
     Returns:
@@ -202,8 +202,7 @@ def _compute_frequencies(Hessian):
     Compute frequencies of a Hamiltonian system.
     -------------------------
     Parameters:
-        potential_hessian (function): Hessian of Hamiltonian potential
-        x (jax.Array): position
+        Hessian (jax.Array): Hessian matrix
     -------------------------
     Returns:
         freqs (jax.Array): frequencies
@@ -224,6 +223,7 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
     n_steps (int or list): number of integration steps(s)
     potential (function): Hamiltonian potential
     potential_grad (function): Hamiltonian potential gradient
+    potential_hessian (function): Hamiltonian potential Hessian
     mass_matrix (jax.Array): mass matrix
     integrator (object): integrator object
     -------------------------
@@ -282,8 +282,10 @@ def _sAIA_GHMC(x_init, n_samples, burn_in, step_size, n_steps,
     n_steps (int or list): number of integration steps(s)
     potential (function): Hamiltonian potential
     potential_grad (function): Hamiltonian potential gradient
+    potential_hessian (function): Hamiltonian potential Hessian
     mass_matrix (jax.Array): mass matrix
-    momentum_noise (float): momentum noise
+    momentum_noise_lower (float): lower bound for momentum noise
+    momentum_noise_upper (float): upper bound for momentum noise
     integrator (object): integrator object
     -------------------------
     Returns:
@@ -341,6 +343,30 @@ def _sAIA_GHMC(x_init, n_samples, burn_in, step_size, n_steps,
 def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, sensibility,
                               target_AR, potential, potential_grad, potential_hessian, mass_matrix,
                               delta_step, integrator, sampler, momentum_noise_lower, momentum_noise_upper, key):
+    """
+    Tuning stage for the s-AIA method
+    -------------------------
+    Parameters:
+    n_samples_tune (int): number of samples for tuning
+    n_samples_check (int): number of samples for checking acceptance rate
+    step_size (float): initial step size
+    n_steps (int): number of integration steps
+    sensibility (float): sensibility for acceptance rate
+    target_AR (float): target acceptance rate
+    potential (function): Hamiltonian potential
+    potential_grad (function): Hamiltonian potential gradient
+    potential_hessian (function): Hamiltonian potential Hessian
+    mass_matrix (jax.Array): mass matrix
+    delta_step (float): step size increment/decrement
+    integrator (object): integrator object
+    sampler (str): sampler type
+    momentum_noise_lower (float): lower bound for momentum noise
+    momentum_noise_upper (float): upper bound for momentum noise
+    key (int): random number generator key
+    -------------------------
+    Returns:
+    tuned_step_size (float): tuned step size
+    """
     tuned_step_size, N, N_tot = step_size, 0, 0
     while N_tot + n_samples_check < n_samples_tune:
         if sampler == "HMC":
@@ -369,6 +395,30 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
                  n_steps, stage, potential, potential_grad, potential_hessian, 
                  mass_matrix, integrator, sampler, momentum_noise_lower,
                  momentum_noise_upper, key):
+    """
+    Burn-In stage for the s-AIA method
+    -------------------------
+    Parameters:
+    n_samples_burn_in (int): number of samples for burn-in
+    n_samples_prod (int): number of samples for production
+    compute_freqs (bool): compute frequencies
+    step_size (float): step size
+    n_steps (int): number of integration steps
+    stage (int): number of stages
+    potential (function): Hamiltonian potential
+    potential_grad (function): Hamiltonian potential gradient
+    potential_hessian (function): Hamiltonian potential Hessian
+    mass_matrix (jax.Array): mass matrix
+    integrator (object): integrator object
+    sampler (str): sampler type
+    momentum_noise_lower (float): lower bound for momentum noise
+    momentum_noise_upper (float): upper bound for momentum noise
+    key (int): random number generator key
+    -------------------------
+    Returns:
+    dimensionless_step_sizes (jax.Array): dimensionless step sizes
+    step_sizes (jax.Array): step sizes
+    """
     if sampler == "HMC":
         samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size,
                                     n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
@@ -430,6 +480,15 @@ def _rho_3(step_size, b):
     return numerator / denominator
 
 def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 20):
+    """
+    Compute optimal coefficients for s-AIA method
+    -------------------------
+    Parameters:
+    dimensionless_step_sizes (jax.Array): dimensionless step sizes
+    stage (int): number of stages
+    key (int): random number generator key
+    n_coeff_samples (int): number of coefficient samples
+    """
     rho, b_MEk, b_VVk = None, None, None
     if stage == 2:
         rho = _rho_2
@@ -456,7 +515,7 @@ def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 
     optimal_coeffs = jnp.array(optimal_coeffs)
     return optimal_coeffs
 
-def lambda_phi(stage, a = None, b = None):
+def __lambda_phi(stage, a = None, b = None):
     if stage == 2:
         lambda_2 = (6*b - 1)/24
         return lambda_2
@@ -465,7 +524,20 @@ def lambda_phi(stage, a = None, b = None):
         return lambda_3
 
 def optimal_momentum_noise(step_size_nondim, stage, D, a = None, b = None):
-    lambda_phi_val = lambda_phi(stage, a, b)
+    """
+    Compute optimal momentum noise for GHMC sampler
+    -------------------------
+    Parameters:
+    step_size_nondim (float): dimensionless step size
+    stage (int): number of stages
+    D (int): dimension of data
+    a (float): coefficient for 3-stage integrator
+    b (float): coefficient for 3-stage integrator
+    -------------------------
+    Returns:
+    phi_opt (float): optimal momentum noise
+    """
+    lambda_phi_val = __lambda_phi(stage, a, b)
     phi_opt = jnp.minimum(1, -jnp.log(0.999)/D * (1 + 2 * step_size_nondim ** 2 * lambda_phi_val)/(2 * step_size_nondim**4 * lambda_phi_val ** 2))
     return phi_opt
 
@@ -478,13 +550,22 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
 
     Note: As of this version the s-AIA method is only supported for 2- & 3-stage
     Splitting Integrators w/ HMC, GHMC sampling.
-    TODO: Complete docstring
     -------------------------
     Parameters:
         x_init (jax.Array): initial position
         potential_args (tuple): arguments for Hamiltonian potential
+        n_samples_tune (int): number of samples for tuning
+        n_samples_check (int): number of samples for checking acceptance rate
+        n_samples_burn_in (int): number of samples for burn-in
+        n_samples_prod (int): number of samples for production
         potential (function): Hamiltonian potential
         mass_matrix (jax.Array): mass matrix
+        target_AR (float): target acceptance rate
+        stage (int): number of stages
+        sensibility (float): sensibility for acceptance rate
+        delta_step (float): step size increment/decrement
+        compute_freqs (bool): compute frequencies
+        sampler (str): sampler type
         RNG_key (int): random number generator key
     -------------------------
     Returns:
