@@ -2,7 +2,7 @@
     <img src="docs/source/static/logo.svg" alt="pyHaiCS Logo" height="200">
 </div>
 
-# pyHaiCS - Hamiltonian-based Monte-Carlo for Computational Statistics (HaiCS) in Python
+# pyHaiCS - Hamiltonian-based Monte-Carlo for Computational Statistics (pyHaiCS) in Python
 
 Introducing `pyHaiCS`, a Python library for Hamiltonian-based Monte-Carlo methods tailored towards practical applications in *computational statistics*. From sampling complex probability distributions, to approximating complex integrals --- such as in the context of Bayesian inference --- `pyHaiCS` is designed to be fast, flexible, and easy to use, with a focus on providing a user-friendly interface for researchers and practitioners while also offering users a variety of *advanced features*. 
 
