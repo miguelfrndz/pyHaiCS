@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Fernandez-de-Retana"
+  given-names: "Miguel"
+  orcid: "https://orcid.org/0009-0002-0883-1303"
+- family-names: "Akhmatskaya"
+  given-names: "Elena"
+  orcid: "https://orcid.org/0000-0002-5136-7991"
+- family-names: "Almeida"
+  given-names: "Aitor"
+  orcid: "https://orcid.org/0000-0002-1585-4717"
+title: "My Research Software"
+version: 2.0.4
+date-released: 2025-02-20
+url: "https://github.com/miguelfrndz/pyHaiCS"
