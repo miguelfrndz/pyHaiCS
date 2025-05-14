@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
-from ..integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator
+from ..integrators.integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator
 from ..utils.metrics import acceptance_rate
 
 @jax.jit

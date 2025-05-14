@@ -1,3 +1,3 @@
-from .basic_mcmc import *
-from .hamiltonian import *
-from .non_mcmc import *
+from . import basic_mcmc
+from . import hamiltonian
+from . import non_mcmc
