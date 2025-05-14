@@ -27,6 +27,15 @@ The main features of `pyHaiCS` include its:
 - `Sampling Metrics`: A variety of metrics related to the quality of the sampling procedures.
 - `Multi-Disciplinary Benchmarks`: Benchmarks provided to evaluate the samplers including applications in computational biology, Bayesian modeling, and physics, as well as toy problems for testing and validation.
 
+## Installation
+You can use `pip` to install `pyHaiCS` from the GitHub official release builds. You can do this by running the following command in your terminal:
+
+```bash
+pip install $(curl -s https://pyhaics.github.io/latest.txt)
+```
+
+Note that the above command will install the latest *official* version of `pyHaiCS` currently available on the GitHub releases page.
+
 ## General API Overview (TO BE UPDATED)
 - `Analysis`: Contains analytical tools for sampling analysis.
 - `Config`: Contains configuration files for running `pyHaiCS`.
