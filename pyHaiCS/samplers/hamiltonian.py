@@ -200,7 +200,7 @@ def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
 def MALA(x_init, potential_args, n_samples, burn_in, step_size, 
         potential, mass_matrix, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
     """
-    Metropolis Adjusted Langevin Algorithm (MALA) sampler.
+    Multi-Chain Metropolis Adjusted Langevin Algorithm (MALA) sampler.
     -------------------------
     Parameters:
         x_init (jax.Array): initial position
@@ -225,7 +225,7 @@ def MALA(x_init, potential_args, n_samples, burn_in, step_size,
 def L2MC(x_init, potential_args, n_samples, burn_in, step_size, 
         potential, mass_matrix, momentum_noise, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
     """
-    Second-Order Langevin Monte Carlo (L2MC) sampler.
+    Multi-Chain Second-Order Langevin Monte Carlo (L2MC) sampler.
     -------------------------
     Parameters:
         x_init (jax.Array): initial position
@@ -251,7 +251,7 @@ def L2MC(x_init, potential_args, n_samples, burn_in, step_size,
 def MDMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
         potential, mass_matrix, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
     """
-    Molecular Dynamics Monte Carlo (MDMC) sampler.
+    Multi-Chain Molecular Dynamics Monte Carlo (MDMC) sampler.
     -------------------------
     Parameters:
         x_init (jax.Array): initial position
@@ -277,7 +277,7 @@ def MDMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
 def SLDMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
         potential, mass_matrix, friction, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
     """
-    Stochastic Langevin Dynamics Monte Carlo (SLDMC) sampler.
+    Multi-Chain Stochastic Langevin Dynamics Monte Carlo (SLDMC) sampler.
     -------------------------
     Parameters:
         x_init (jax.Array): initial position
