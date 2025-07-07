@@ -154,7 +154,7 @@ def _single_chain_GHMC(x_init, n_samples, burn_in, step_size, n_steps,
     return samples
 
 def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps, 
-        potential, mass_matrix, momentum_noise, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
+        potential, mass_matrix, momentum_noise, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42, sampler = "GHMC"):
     """
     Multi-Chain Generalized Hamiltonian Monte-Carlo (GHMC) sampler.
     -------------------------
@@ -175,7 +175,7 @@ def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
     Returns:
         samples (jax.Array): samples
     """
-    print("Running GHMC sampler...")
+    print(f"Running {sampler} sampler...")
     print("="*61)
     print(f"{'Num. Chains':^30}|{n_chains:^30}")
     print(f"{'Num. Samples':^30}|{n_samples:^30}")
@@ -191,6 +191,57 @@ def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
     vectorized_chain = jax.vmap(_single_chain_GHMC, in_axes=(0, None, None, None, None, None, None, None, None, None, 0))
     samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, n_steps, potential, potential_grad, mass_matrix, momentum_noise, integrator, keys)
     return samples
+
+def MALA(x_init, potential_args, n_samples, burn_in, step_size, 
+        potential, mass_matrix, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
+    """
+    Metropolis Adjusted Langevin Algorithm (MALA) sampler.
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        potential_args (tuple): arguments for Hamiltonian potential
+        n_samples (int): number of samples
+        burn_in (int): burn-in samples
+        step_size (float): step-size
+        potential (function): Hamiltonian potential
+        mass_matrix (jax.Array): mass matrix
+        integrator (object): integrator object
+        n_chains (int): number of chains
+        RNG_key (int): random number generator key
+    -------------------------
+    Returns:
+        samples (jax.Array): samples
+    """
+    return GHMC(x_init = x_init, potential_args = potential_args, 
+                n_samples = n_samples, burn_in = burn_in, step_size = step_size, 
+                n_steps = 1, potential = potential, mass_matrix = mass_matrix, 
+                momentum_noise = 1, integrator = integrator, n_chains = n_chains, RNG_key = RNG_key, sampler = "MALA")
+
+def L2MC(x_init, potential_args, n_samples, burn_in, step_size, 
+        potential, mass_matrix, momentum_noise, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
+    """
+    Second-Order Langevin Monte Carlo (L2MC) sampler.
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        potential_args (tuple): arguments for Hamiltonian potential
+        n_samples (int): number of samples
+        burn_in (int): burn-in samples
+        step_size (float): step-size
+        potential (function): Hamiltonian potential
+        mass_matrix (jax.Array): mass matrix
+        momentum_noise (float): momentum noise
+        integrator (object): integrator object
+        n_chains (int): number of chains
+        RNG_key (int): random number generator key
+    -------------------------
+    Returns:
+        samples (jax.Array): samples
+    """
+    return GHMC(x_init = x_init, potential_args = potential_args, 
+                n_samples = n_samples, burn_in = burn_in, step_size = step_size, 
+                n_steps = 1, potential = potential, mass_matrix = mass_matrix, 
+                momentum_noise = momentum_noise, integrator = integrator, n_chains = n_chains, RNG_key = RNG_key, sampler = "L2MC")
 
 def MMHMC():
     # TODO: Implement MMHMC sampler
