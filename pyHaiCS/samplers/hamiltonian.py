@@ -112,7 +112,8 @@ def HMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
     return samples
 
 def _single_chain_GHMC(x_init, n_samples, burn_in, step_size, n_steps, 
-        potential, potential_grad, mass_matrix, momentum_noise, integrator, key):
+        potential, potential_grad, mass_matrix, momentum_noise, integrator, 
+        key, metropolize):
     """
     Single-Chain Generalized Hamiltonian Monte-Carlo (GHMC) sampler.
     -------------------------
@@ -145,9 +146,12 @@ def _single_chain_GHMC(x_init, n_samples, burn_in, step_size, n_steps,
         x_new, p_new = integrator.integrate(x, p_prop, potential_grad, n_steps, mass_matrix, step_size)
         # Computer enery error
         delta_H = Hamiltonian(x_new, p_new, potential, mass_matrix) - Hamiltonian(x, p_prop, potential, mass_matrix)
-        # Metropolis-Hastings acceptance
-        accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
-        x, p = jax.lax.cond(accept, lambda _:(x_new, p_new), lambda _:(x, -p_prop), operand=None)
+        if metropolize:
+            # Metropolis-Hastings acceptance
+            accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
+            x, p = jax.lax.cond(accept, lambda _:(x_new, p_new), lambda _:(x, -p_prop), operand=None)
+        else:
+            x, p = x_new, p_new
         if n >= burn_in:
             samples.append(x)
     samples = jnp.stack(samples, axis = 0)
@@ -189,7 +193,8 @@ def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
     potential = jax.tree_util.Partial(potential, *potential_args)
     potential_grad = jax.grad(potential)
     vectorized_chain = jax.vmap(_single_chain_GHMC, in_axes=(0, None, None, None, None, None, None, None, None, None, 0))
-    samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, n_steps, potential, potential_grad, mass_matrix, momentum_noise, integrator, keys)
+    metropolize = (sampler != "MDMC" and sampler != "SLDMC")
+    samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, n_steps, potential, potential_grad, mass_matrix, momentum_noise, integrator, keys, metropolize)
     return samples
 
 def MALA(x_init, potential_args, n_samples, burn_in, step_size, 
@@ -242,6 +247,61 @@ def L2MC(x_init, potential_args, n_samples, burn_in, step_size,
                 n_samples = n_samples, burn_in = burn_in, step_size = step_size, 
                 n_steps = 1, potential = potential, mass_matrix = mass_matrix, 
                 momentum_noise = momentum_noise, integrator = integrator, n_chains = n_chains, RNG_key = RNG_key, sampler = "L2MC")
+
+def MDMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
+        potential, mass_matrix, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
+    """
+    Molecular Dynamics Monte Carlo (MDMC) sampler.
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        potential_args (tuple): arguments for Hamiltonian potential
+        n_samples (int): number of samples
+        burn_in (int): burn-in samples
+        step_size (float): step-size
+        n_steps (int): number of integration steps
+        potential (function): Hamiltonian potential
+        mass_matrix (jax.Array): mass matrix
+        integrator (object): integrator object
+        n_chains (int): number of chains
+        RNG_key (int): random number generator key
+    -------------------------
+    Returns:
+        samples (jax.Array): samples
+    """
+    return GHMC(x_init = x_init, potential_args = potential_args, 
+                n_samples = n_samples, burn_in = burn_in, step_size = step_size, 
+                n_steps = n_steps, potential = potential, mass_matrix = mass_matrix, 
+                momentum_noise = 0, integrator = integrator, n_chains = n_chains, RNG_key = RNG_key, sampler = "MDMC")
+
+def SLDMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
+        potential, mass_matrix, friction, integrator = VerletIntegrator(), n_chains = 4, RNG_key = 42):
+    """
+    Stochastic Langevin Dynamics Monte Carlo (SLDMC) sampler.
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        potential_args (tuple): arguments for Hamiltonian potential
+        n_samples (int): number of samples
+        burn_in (int): burn-in samples
+        step_size (float): step-size
+        n_steps (int): number of integration steps
+        potential (function): Hamiltonian potential
+        mass_matrix (jax.Array): mass matrix
+        friction (float): friction coefficient (gamma)
+        integrator (object): integrator object
+        n_chains (int): number of chains
+        RNG_key (int): random number generator key
+    -------------------------
+    Returns:
+        samples (jax.Array): samples
+    """
+    momentum_noise = jnp.sqrt(2 * friction * step_size)
+    return GHMC(x_init = x_init, potential_args = potential_args, 
+                n_samples = n_samples, burn_in = burn_in, step_size = step_size, 
+                n_steps = n_steps, potential = potential, mass_matrix = mass_matrix, 
+                momentum_noise = momentum_noise, integrator = integrator, n_chains = n_chains, 
+                RNG_key = RNG_key, sampler = "SLDMC")
 
 def MMHMC():
     # TODO: Implement MMHMC sampler
