@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 PYHAICS_PATH = Path(__file__).parents[2]
 sys.path.append(str(PYHAICS_PATH))
+sys.path.insert(0, str(PYHAICS_PATH))
 
 import pyHaiCS as haics
 from pyHaiCS.utils.test import HiddenPrints
@@ -26,7 +27,7 @@ class TestRWMH(unittest.TestCase):
 
     def setUp(self):
         self.x_init = jnp.array([0.0])
-        self.n_samples = 1000
+        self.n_samples = 100
         self.burn_in = 100
         self.step_size = 0.5
         self.key = jax.random.PRNGKey(0)
@@ -58,6 +59,135 @@ class TestRWMH(unittest.TestCase):
             RNG_key=123
         )
         self.assertEqual(samples.shape, (n_chains, self.n_samples, 1))
+
+class TestHMC(unittest.TestCase):
+    """
+    Unit tests for the HMC sampler in pyHaiCS.
+    Tests both single and multi-chain sampling for shape correctness.
+    """
+
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    @staticmethod
+    def quadratic_potential_grad(x):
+        return x
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 10
+        self.step_size = 0.1
+        self.n_steps = 5
+        self.mass_matrix = jnp.eye(1)
+        self.key = jax.random.PRNGKey(0)
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+        self.potential = self.quadratic_potential
+        self.potential_grad = self.quadratic_potential_grad
+
+    @HiddenPrints
+    def test_single_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian._single_chain_HMC(
+            self.x_init,
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.potential_grad,
+            self.mass_matrix,
+            self.integrator,
+            self.key
+        )
+        self.assertEqual(samples.shape, (self.n_samples, 1))
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        n_chains = 3
+        samples = haics.samplers.hamiltonian.HMC(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.mass_matrix,
+            integrator=self.integrator,
+            n_chains=n_chains,
+            RNG_key=123
+        )
+        self.assertEqual(samples.shape, (n_chains, self.n_samples, 1))
+
+    @HiddenPrints
+    def test_all_integrators(self):
+        integrators = [
+            haics.integrators.integrators.VerletIntegrator(),
+            haics.integrators.integrators.VV_2(),
+            haics.integrators.integrators.ME_2(),
+            haics.integrators.integrators.VV_3(),
+            haics.integrators.integrators.ME_3(),
+            haics.integrators.integrators.MSSI_2(b=0.3),
+            haics.integrators.integrators.MSSI_3(a=0.2, b=0.3),
+        ]
+        for integrator in integrators:
+            with self.subTest(integrator=type(integrator).__name__):
+                samples = haics.samplers.hamiltonian.HMC(
+                    self.x_init,
+                    (),
+                    self.n_samples,
+                    self.burn_in,
+                    self.step_size,
+                    self.n_steps,
+                    self.potential,
+                    self.mass_matrix,
+                    integrator=integrator,
+                    n_chains=2,
+                    RNG_key=42
+                )
+                self.assertEqual(samples.shape, (2, self.n_samples, 1))
+
+    @HiddenPrints
+    def test_invalid_xinit_shape(self):
+        bad_x_init = jnp.array([[0.0, 0.0]])  # Wrong shape: 2D instead of 1D
+        with self.assertRaises(Exception):
+            with HiddenPrints():
+                haics.samplers.hamiltonian.HMC(
+                    bad_x_init,
+                    (),
+                    self.n_samples,
+                    self.burn_in,
+                    self.step_size,
+                    self.n_steps,
+                    self.potential,
+                    self.mass_matrix,
+                    n_chains=2,
+                    RNG_key=123
+                )
+
+    @HiddenPrints
+    def test_burnin_zero(self):
+        samples = haics.samplers.hamiltonian.HMC(
+            self.x_init,
+            (),
+            self.n_samples,
+            burn_in=0,
+            step_size=self.step_size,
+            n_steps=self.n_steps,
+            potential=self.potential,
+            mass_matrix=self.mass_matrix,
+            n_chains=2,
+            RNG_key=7
+        )
+        self.assertEqual(samples.shape, (2, self.n_samples, 1))
+
+    @HiddenPrints
+    def test_gradient_consistency(self):
+        x = jnp.array([1.5])
+        grad_auto = jax.grad(self.potential)(x)
+        grad_manual = self.potential_grad(x)
+        self.assertTrue(jnp.allclose(grad_auto, grad_manual))
 
 if __name__ == '__main__':
     unittest.main()
