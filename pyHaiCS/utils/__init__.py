@@ -1,1 +1,1 @@
-from ..utils import estimators, metrics, test
+from ..utils import estimators, metrics, test, hamiltonian

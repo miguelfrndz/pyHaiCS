@@ -120,7 +120,7 @@ print(f"Accuracy (w/ RW-MH Sampling): {accuracy}\n")
 ##################### HMC w/s-AIA Adaptive Scheme #####################
 
 # HMC w/s-AIA for posterior sampling
-params_samples = haics.samplers.hamiltonian.sAIA(params,
+params_samples = haics.samplers.adaptive.sAIA(params,
                             potential_args = (X_train, y_train),
                             n_samples_tune = 1000, 
                             n_samples_check = 200,
@@ -144,7 +144,7 @@ print(f"Accuracy (w/ HMC Sampling + s-AIA Adaptive Scheme): {accuracy}\n")
 ##################### GHMC w/s-AIA Adaptive Scheme #####################
 
 # GHMC w/s-AIA for posterior sampling
-params_samples = haics.samplers.hamiltonian.sAIA(params,
+params_samples = haics.samplers.adaptive.sAIA(params,
                             potential_args = (X_train, y_train),
                             n_samples_tune = 1000, 
                             n_samples_check = 200,

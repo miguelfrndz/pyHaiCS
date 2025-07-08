@@ -129,7 +129,7 @@ for train_index, test_index in splitter.split(X, y):
                             RNG_key = 120)
     
     # GHMC w/s-AIA adaptive scheme for posterior sampling
-    # params_samples = haics.samplers.hamiltonian.sAIA(params,
+    # params_samples = haics.samplers.adaptive.sAIA(params,
     #                         potential_args = (X_train, y_train),
     #                         n_samples_tune = 1000, 
     #                         n_samples_check = 200,
@@ -142,7 +142,7 @@ for train_index, test_index in splitter.split(X, y):
     #                         compute_freqs = True, sampler = "GHMC", RNG_key = 42)
     
     # HMC w/s-AIA adaptive scheme for posterior sampling
-    # params_samples = haics.samplers.hamiltonian.sAIA(params,
+    # params_samples = haics.samplers.adaptive.sAIA(params,
     #                         potential_args = (X_train, y_train),
     #                         n_samples_tune = 1000, 
     #                         n_samples_check = 200,

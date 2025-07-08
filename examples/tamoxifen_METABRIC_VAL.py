@@ -105,7 +105,7 @@ params_samples = haics.samplers.hamiltonian.HMC(params,
                         RNG_key = 120)
 
 # HMC w/s-AIA adaptive scheme for posterior sampling
-# params_samples = haics.samplers.hamiltonian.sAIA(params,
+# params_samples = haics.samplers.adaptive.sAIA(params,
 #                         potential_args = (X_train, y_train),
 #                         n_samples_tune = 1000, 
 #                         n_samples_check = 200,
