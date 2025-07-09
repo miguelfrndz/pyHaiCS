@@ -31,5 +31,8 @@ uv run -m unittest -v test_integrators.py
 echo -e "\n${BIBlue}Running Sampler Tests...${Color_Off}"
 uv run -m unittest -v test_samplers.py
 
+echo -e "\n${BIBlue}Running Adaptive Sampler Tests...${Color_Off}"
+uv run -m unittest -v test_adaptive.py
+
 echo -e "\n${BIGreen}Finished Running All Tests!${Color_Off}\n"
 exit 0
