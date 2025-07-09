@@ -160,7 +160,7 @@ def GHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
     x_init_repeated = jnp.repeat(x_init[None, :], n_chains, axis = 0)
     potential = jax.tree_util.Partial(potential, *potential_args)
     potential_grad = jax.grad(potential)
-    vectorized_chain = jax.vmap(_single_chain_GHMC, in_axes=(0, None, None, None, None, None, None, None, None, None, 0))
+    vectorized_chain = jax.vmap(_single_chain_GHMC, in_axes=(0, None, None, None, None, None, None, None, None, None, 0, None))
     metropolize = (sampler != "MDMC" and sampler != "SLDMC")
     samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, n_steps, potential, potential_grad, mass_matrix, momentum_noise, integrator, keys, metropolize)
     return samples
@@ -271,9 +271,9 @@ def SLDMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps,
                 momentum_noise = momentum_noise, integrator = integrator, n_chains = n_chains, 
                 RNG_key = RNG_key, sampler = "SLDMC")
 
-def MMHMC():
-    # TODO: Implement MMHMC sampler
-    raise NotImplementedError("MMHMC sampler not implemented yet!")
+def MHMC():
+    # TODO: Implement MHMC sampler
+    raise NotImplementedError("MHMC sampler not implemented yet!")
 
 def RMHMC():
     # TODO: Implement RMHMC sampler

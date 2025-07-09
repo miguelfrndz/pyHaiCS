@@ -189,5 +189,179 @@ class TestHMC(unittest.TestCase):
         grad_manual = self.potential_grad(x)
         self.assertTrue(jnp.allclose(grad_auto, grad_manual))
 
+class TestGHMC(unittest.TestCase):
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.n_steps = 3
+        self.mass_matrix = jnp.eye(1)
+        self.momentum_noise = 0.5
+        self.key = jax.random.PRNGKey(0)
+        self.potential = self.quadratic_potential
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian.GHMC(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.mass_matrix,
+            self.momentum_noise,
+            integrator=self.integrator,
+            n_chains=3,
+            RNG_key=0
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
+
+class TestMALA(unittest.TestCase):
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.mass_matrix = jnp.eye(1)
+        self.potential = self.quadratic_potential
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian.MALA(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.potential,
+            self.mass_matrix,
+            integrator=self.integrator,
+            n_chains=3,
+            RNG_key=1
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
+
+class TestL2MC(unittest.TestCase):
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.mass_matrix = jnp.eye(1)
+        self.momentum_noise = 0.5
+        self.potential = self.quadratic_potential
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian.L2MC(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.potential,
+            self.mass_matrix,
+            self.momentum_noise,
+            integrator=self.integrator,
+            n_chains=3,
+            RNG_key=2
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
+
+class TestMDMC(unittest.TestCase):
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.n_steps = 3
+        self.mass_matrix = jnp.eye(1)
+        self.potential = self.quadratic_potential
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian.MDMC(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.mass_matrix,
+            integrator=self.integrator,
+            n_chains=3,
+            RNG_key=3
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
+
+class TestSLDMC(unittest.TestCase):
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.n_steps = 3
+        self.mass_matrix = jnp.eye(1)
+        self.friction = 0.4
+        self.potential = self.quadratic_potential
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian.SLDMC(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.mass_matrix,
+            self.friction,
+            integrator=self.integrator,
+            n_chains=3,
+            RNG_key=4
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
+
+class TestNonImplementedSamplers(unittest.TestCase):
+    @HiddenPrints
+    def test_mhmc_raises_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            haics.samplers.hamiltonian.MHMC()
+
+    @HiddenPrints
+    def test_rmhmc_raises_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            haics.samplers.hamiltonian.RMHMC()
+
 if __name__ == '__main__':
     unittest.main()
