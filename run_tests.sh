@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e  # EXIT ON ANY ERROR
+
 # Bash Script for running all pyHaiCS tests simultaneoulsy
 
 source pyHaiCS/config/bash_colors.sh # Contains terminal color options
