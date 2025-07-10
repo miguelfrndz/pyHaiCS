@@ -1,6 +1,7 @@
 import unittest
 import jax
 import jax.numpy as jnp
+
 from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs
 from pyHaiCS.integrators.integrators import ME_3, VV_3
 from pyHaiCS.utils.test import HiddenPrints
