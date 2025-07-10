@@ -363,5 +363,77 @@ class TestNonImplementedSamplers(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             haics.samplers.hamiltonian.RMHMC()
 
+class DummyGaussian:
+    """Simple 1D Gaussian proposal distribution for testing."""
+    def __init__(self, loc=0.0, scale=1.0):
+        self.loc = loc
+        self.scale = scale
+
+    def sample(self, key, shape=()):
+        return jax.random.normal(key, shape) * self.scale + self.loc
+
+    def pdf(self, x):
+        return jnp.exp(-0.5 * ((x - self.loc) / self.scale) ** 2) / (jnp.sqrt(2 * jnp.pi) * self.scale)
+
+class TestRejectionSampling(unittest.TestCase):
+    """
+    Unit tests for rejection sampling methods.
+    """
+
+    def setUp(self):
+        self.n_samples = 20
+        self.n_chains = 3
+        self.M = 1.5
+        self.key = jax.random.PRNGKey(0)
+        self.proposal = DummyGaussian(loc=0.0, scale=1.0)
+
+        # Target is same as proposal for convenience (acceptance rate ~1)
+        self.target = lambda x: self.proposal.pdf(x)
+
+    @HiddenPrints
+    def test_single_chain_output_shape(self):
+        samples = haics.samplers.standard._single_chain_rejection_sampling(
+            self.proposal, self.target, self.M, self.n_samples, self.key
+        )
+        self.assertEqual(samples.shape, (self.n_samples,))
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.standard.rejection_sampling(
+            self.proposal, self.target, self.M, self.n_samples, n_chains=self.n_chains, RNG_key=0
+        )
+        self.assertEqual(samples.shape, (self.n_chains, self.n_samples))
+
+class TestImportanceSampling(unittest.TestCase):
+    """
+    Unit tests for importance sampling methods.
+    """
+
+    def setUp(self):
+        self.n_samples = 20
+        self.n_chains = 3
+        self.key = jax.random.PRNGKey(0)
+        self.proposal = DummyGaussian(loc=0.0, scale=1.0)
+        self.target = lambda x: self.proposal.pdf(x)
+
+    @HiddenPrints
+    def test_single_chain_output_shape(self):
+        samples, weights = haics.samplers.standard._single_chain_importance_sampling(
+            self.proposal, self.target, self.n_samples, self.key
+        )
+        self.assertEqual(samples.shape, (self.n_samples,))
+        self.assertEqual(weights.shape, (self.n_samples,))
+        self.assertAlmostEqual(float(jnp.sum(weights)), 1.0, places=4)
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples, weights = haics.samplers.standard.importance_sampling(
+            self.proposal, self.target, self.n_samples, n_chains=self.n_chains, RNG_key=0
+        )
+        self.assertEqual(samples.shape, (self.n_chains, self.n_samples))
+        self.assertEqual(weights.shape, (self.n_chains, self.n_samples))
+        for i in range(self.n_chains):
+            self.assertAlmostEqual(float(jnp.sum(weights[i])), 1.0, places=4)
+
 if __name__ == '__main__':
     unittest.main()
