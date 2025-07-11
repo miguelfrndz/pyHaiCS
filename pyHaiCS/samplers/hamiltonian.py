@@ -1,10 +1,8 @@
 import jax
 import jax.numpy as jnp
 from tqdm import tqdm
-from functools import partial
-from ..integrators.integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator
-from ..utils.metrics import acceptance_rate
-from ..utils.hamiltonian import Hamiltonian
+from ..integrators.integrators import VerletIntegrator, RMHMCVerletIntegrator
+from ..utils.hamiltonian import Hamiltonian, Hamiltonian_RMHMC
 
 def _single_chain_HMC(x_init, n_samples, burn_in, step_size, n_steps, 
         potential, potential_grad, mass_matrix, integrator, key):
@@ -275,6 +273,73 @@ def MHMC():
     # TODO: Implement MHMC sampler
     raise NotImplementedError("MHMC sampler not implemented yet!")
 
-def RMHMC():
-    # TODO: Implement RMHMC sampler
-    raise NotImplementedError("RMHMC sampler not implemented yet!")
+def _single_chain_RMHMC(x_init, n_samples, burn_in, step_size, n_steps,
+                        potential, metric, integrator, key):
+    """
+    Single-Chain Riemannian Manifold Hamiltonian Monte Carlo (RMHMC).
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        n_samples (int): number of samples
+        burn_in (int): burn-in samples
+        step_size (float): step size
+        n_steps (int): number of integration steps
+        potential (function): Hamiltonian potential
+        metric (function): metric tensor function G(theta)
+        integrator (object): integrator with integrate_rmhmc()
+    -------------------------
+    Returns:
+        samples (jax.Array): samples
+    """
+    samples = []
+    hamiltonian = jax.tree_util.Partial(Hamiltonian_RMHMC, potential=potential, metric=metric)
+    x = x_init
+    for n in tqdm(range(n_samples + burn_in)):
+        key, subkey = jax.random.split(key)
+        G = metric(x)
+        p = jax.random.multivariate_normal(subkey, jnp.zeros(x.shape[0]), G)
+        x_prop, p_prop = integrator.integrate(x, p, hamiltonian, n_steps, step_size)
+        # RMHMC Hamiltonian (non-separable)
+        delta_H = hamiltonian(x_prop, p_prop) - hamiltonian(x, p)
+        accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
+        x = jax.lax.cond(accept, lambda _: x_prop, lambda _: x, operand=None)
+        if n >= burn_in:
+            samples.append(x)
+    samples = jnp.stack(samples, axis=0)
+    return samples
+
+def RMHMC(x_init, potential_args, n_samples, burn_in, step_size, n_steps, potential, metric, integrator = RMHMCVerletIntegrator(), n_chains=4, RNG_key=42):
+    """
+    Multi-Chain Riemannian Manifold Hamiltonian Monte Carlo (RMHMC) sampler.
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        potential_args (tuple): arguments for Hamiltonian potential
+        n_samples (int): number of samples
+        burn_in (int): burn-in samples
+        step_size (float): step-size
+        n_steps (int): number of integration steps
+        potential (function): Hamiltonian potential
+        metric (function): metric tensor G(theta)
+        integrator (object): integrator with integrate_rmhmc()
+        n_chains (int): number of chains
+        RNG_key (int): random seed
+    -------------------------
+    Returns:
+        samples (jax.Array): samples
+    """
+    print(f"Running RMHMC sampler...")
+    print("=" * 61)
+    print(f"{'Num. Chains':^30}|{n_chains:^30}")
+    print(f"{'Num. Samples':^30}|{n_samples:^30}")
+    print(f"{'Num. Burn-In Iterations':^30}|{burn_in:^30}")
+    print(f"{'Step-Size':^30}|{step_size:^30}")
+    print(f"{'Num. Integration Steps':^30}|{n_steps:^30}")
+    print("=" * 61)
+    keys = jax.random.split(jax.random.PRNGKey(RNG_key), n_chains)
+    x_init_repeated = jnp.repeat(x_init[None, :], n_chains, axis=0)
+    potential = jax.tree_util.Partial(potential, *potential_args)
+    # metric = jax.tree_util.Partial(metric, *potential_args)
+    vectorized_chain = jax.vmap(_single_chain_RMHMC, in_axes=(0, None, None, None, None, None, None, None, 0))
+    samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, n_steps, potential, metric, integrator, keys)
+    return samples
