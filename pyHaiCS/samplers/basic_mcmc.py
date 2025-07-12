@@ -65,3 +65,65 @@ def RWMH(x_init, potential_args, n_samples, burn_in, step_size, potential, n_cha
     vectorized_chain = jax.vmap(_single_chain_RWMH, in_axes=(0, None, None, None, None, 0))
     samples = vectorized_chain(x_init_repeated, n_samples, burn_in, step_size, potential, keys)
     return samples
+
+def _single_chain_gibbs_sampling(conditional_sampler, initial_state, n_samples, key):
+    """
+    Run a single Gibbs sampling chain.
+
+    Args:
+        conditional_sampler: function (state, dim_index, key) -> new_value
+        initial_state: jnp.array, initial sample
+        n_samples: int, number of samples
+        key: jax.random.PRNGKey
+    
+    Returns:
+        samples: jnp.ndarray, shape (n_samples, dim)
+    """
+    dim = initial_state.shape[0]
+    samples = []
+    state = initial_state
+    keys = jax.random.split(key, n_samples * dim)
+
+    def body_fn(carry, key):
+        state, i = carry
+        dim_index = i % dim
+        new_value = conditional_sampler(state, dim_index, key)
+        state = state.at[dim_index].set(new_value)
+        i += 1
+        return (state, i), state
+
+    def gibbs_scan(_, __):
+        return jax.lax.scan(body_fn, (initial_state, 0), keys)
+
+    (final_state, _), all_states = gibbs_scan(None, None)
+    # Keep only full samples after each full sweep
+    all_samples = all_states[dim - 1::dim]
+    return all_samples
+
+def gibbs_sampling(conditional_sampler, initial_states, n_samples, n_chains=4, RNG_key=42):
+    """
+    Multi-chain Gibbs sampling.
+
+    Args:
+        conditional_sampler: function(state, dim_index, key) -> new_value
+        initial_states: jnp.ndarray, shape (n_chains, dim)
+        n_samples: int, number of samples per chain
+        n_chains: int
+        RNG_key: int
+    
+    Returns:
+        samples: jnp.ndarray, shape (n_chains, n_samples, dim)
+    """
+    print("Running Gibbs Sampler...")
+    print("=" * 61)
+    print(f"{'Num. Chains':^30}|{n_chains:^30}")
+    print(f"{'Num. Samples':^30}|{n_samples:^30}")
+    print("=" * 61)
+
+    keys = jax.random.split(jax.random.PRNGKey(RNG_key), n_chains)
+    vectorized_chain = jax.vmap(
+        _single_chain_gibbs_sampling,
+        in_axes=(None, 0, None, 0)
+    )
+    samples = vectorized_chain(conditional_sampler, initial_states, n_samples, keys)
+    return samples

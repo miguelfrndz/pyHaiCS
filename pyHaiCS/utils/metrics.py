@@ -1,6 +1,9 @@
 import jax
+import warnings
 import jax.numpy as jnp
 import numpy as np
+
+from .coda_utils import ar_process_fit, monotone_sequence, batch_means
 
 def autocovariance(samples, lag = 1):
     """
@@ -70,7 +73,7 @@ def _geyerESS_atomic(samples, thres_estimator, normalize):
         return ESS / n_samples
     return ESS
 
-def geyerESS(samples, thres_estimator = 'IMSE', normalize = True):
+def geyerESS(samples, thres_estimator = 'var_trunc', normalize = True):
     """
     Calculates the Geyer's Effective Sample Size (ESS) of a series of samples.
     """
@@ -84,6 +87,155 @@ def geyerESS(samples, thres_estimator = 'IMSE', normalize = True):
             ess_value = _geyerESS_atomic(samples_iter, thres_estimator, normalize)
             ess_values.append(ess_value)
     return jnp.array(ess_values).reshape(n_chains, dims)
+
+def multiESS(samples, batch_size = 'sqroot', Noffsets = 10, Nb = None, normalize = True):
+    """
+    Adapted from: https://github.com/Gabriel-p/multiESS (no longer maintained)
+
+    Compute multivariate effective sample size of a single Markov chain X,
+    using the multivariate dependence structure of the process.
+
+    X: MCMC samples of shape (n, p)
+    n: number of samples
+    p: number of parameters
+
+    b: specifies the batch size for estimation of the covariance matrix in
+       Markov chain CLT. It can take a numeric value between 1 and n/2, or a
+       char value between:
+
+    'sqroot'    b=floor(n^(1/2)) (for chains with slow mixing time; default)
+    'cuberoot'  b=floor(n^(1/3)) (for chains with fast mixing time)
+    'lESS'      pick the b that produces the lowest effective sample size
+                for a number of b ranging from n^(1/4) to n/max(20,p); this
+                is a conservative choice
+
+    If n is not divisible by b Sigma is recomputed for up to Noffsets subsets
+    of the data with different offsets, and the output mESS is the average over
+    the effective sample sizes obtained for different offsets.
+
+    Nb specifies the number of values of b to test when b='less'
+    (default NB=200). This option is unused for other choices of b.
+
+    If normalize is True, the effective sample size is normalized by the number of samples.
+
+    Original source: https://github.com/lacerbi/multiESS
+
+    Reference:
+    Vats, D., Flegal, J. M., & Jones, G. L. "Multivariate Output Analysis
+    for Markov chain Monte Carlo", arXiv preprint arXiv:1512.07713 (2015).
+
+    """
+    n_chains, n_samples, dims = samples.shape
+    if dims > n_samples:
+        raise ValueError("More dimensions than data points; cannot compute effective sample size.")
+    if isinstance(batch_size, str):
+        if batch_size not in ['sqroot', 'cuberoot', 'less']:
+            raise ValueError("Unknown batch size string. Use 'sqroot', 'cuberoot', or 'less'.")
+        if batch_size != 'less' and Nb is not None:
+            print("Warning: Nb is ignored unless b='less'")
+    else:
+        if not 1. < batch_size < (n_samples / 2):
+            raise ValueError("The batch size B needs to be between 1 and N/2.")
+    ess_values = []
+    for chain in range(n_chains):
+        mESS = _multiESS_chain(samples[chain], n_samples, dims, batch_size, Noffsets, Nb)
+        if normalize:
+            mESS /= n_samples
+        ess_values.append(mESS)
+    return jnp.array(ess_values).reshape(n_chains, dims)
+
+def _multiESS_chain(Xi, n, p, b, Noffsets, Nb):
+    """
+    Compute multiESS for a MCMC chain.
+    """
+    if b == 'sqroot':
+        b = [int(jnp.floor(n ** (1. / 2)))]
+    elif b == 'cuberoot':
+        b = [int(jnp.floor(n ** (1. / 3)))]
+    elif b == 'less':
+        b_min = jnp.floor(n ** (1. / 4))
+        b_max = max(jnp.floor(n / max(p, 20)), jnp.floor(jnp.sqrt(n)))
+        if Nb is None:
+            Nb = 200
+        b = jnp.unique(jnp.round(jnp.exp(jnp.linspace(jnp.log(b_min), jnp.log(b_max), Nb)))).astype(int)
+
+    theta = jnp.mean(Xi, axis=0)
+    detLambda = jnp.var(Xi.T) if p == 1 else jnp.linalg.det(jnp.cov(Xi.T))
+
+    mESS_values = jnp.array([_multiESS_batch(Xi, n, p, theta, detLambda, bi, Noffsets) for bi in b])
+    return jnp.min(mESS_values)
+
+def _multiESS_batch(Xi, n, p, theta, detLambda, b, Noffsets):
+    """
+    Compute multiESS for a given batch size B.
+    """
+    # Compute batch estimator for SIGMA
+    a = int(jnp.floor(n / b))
+    Sigma = jnp.zeros((p, p))
+
+    max_offset = n - a * b
+    offsets = jnp.unique(jnp.round(jnp.linspace(0, max_offset, Noffsets)).astype(int))
+
+    def offset_sigma(j):
+        indices = j + jnp.arange(a * b)
+        Y = Xi[indices, :].reshape((a, b, p))
+        Ybar = jnp.mean(Y, axis=1)
+        Z = Ybar - theta
+        Sigma_local = jnp.einsum('ij,ik->jk', Z, Z)
+        return Sigma_local
+
+    Sigma_total = jnp.sum(jnp.stack([offset_sigma(j) for j in offsets]), axis=0)
+    Sigma = (Sigma_total * b) / (a - 1) / len(offsets)
+
+    mESS = n * (detLambda / jnp.linalg.det(Sigma)) ** (1. / p)
+    return mESS
+
+def codaESS(samples, axis = 0, method = 'ar', normed = False, options = {}, normalize = True):
+    """
+    Wrapper for calling a function specified by the `method` argument.
+    Estimates effective sample sizes (ESS) of samples along the specified axis.
+
+    Parameters
+    ----------
+    samples : numpy 1d or 2d array
+    axis : int, optional
+    method : str, {'ar', 'monotone-sequence', 'batch-means'}
+    normed : bool
+        If True, the efficiency (ESS per MCMC sample) is returned.
+    options : dict with keys in ['max_ar_order', 'n_batch']
+    normalize : bool
+
+    Returns
+    -------
+    ess : numpy array
+    """
+    # TODO: Currently uses Numpy instead of JAX. Implement JAX version with vectorized operations for chains/dimensions.
+    samples = np.array(samples)
+    n_chains, n_samples, dims = samples.shape
+    if n_samples <= 25:
+        warnings.warn(
+            "The number of samples is extremely small. The estimated ESS "
+            "will likely be not reliable at all."
+        )
+    ess_values = []
+    for chain in range(n_chains):
+        if method == 'ar':
+            max_ar_order = options.get('max_ar_order', None)
+            ess = ar_process_fit(samples[chain], axis, normed, max_ar_order=max_ar_order)
+
+        elif method == 'monotone-sequence':
+            ess, _ = monotone_sequence(samples[chain], axis, normed)
+
+        elif method == 'batch-means':
+            n_batch = options.get('n_batch', 25)
+            ess = batch_means(samples[chain], axis, normed, n_batch=n_batch)
+        else:
+            raise NotImplementedError("Method {:s} is not supported.".format(method))
+        if normalize:
+            ess = ess / n_samples
+        ess_values.append(ess)
+    return jnp.array(ess_values).reshape(n_chains, dims)
+
 
 def MCSE(samples, ess_values):
     """

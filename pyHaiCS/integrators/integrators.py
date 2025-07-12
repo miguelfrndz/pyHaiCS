@@ -64,6 +64,42 @@ class VerletIntegrator(Integrator):
         # Half-Step update for momentum
         p = self._momentum_half_step(x, p, step_size, potential_grad)
         return x, p
+    
+class RMHMCVerletIntegrator(Integrator):
+    """
+    Generalized Leapfrog Integrator for Riemannian Manifold HMC (RMHMC).
+    """
+    def __init__(self):
+        super().__init__()
+
+    @partial(jax.jit, static_argnums=(0, 3))
+    def _integrator_step(self, x, p, hamiltonian, step_size):
+        # Half-Step update for momentum
+        p = p - 0.5 * step_size * jax.grad(hamiltonian, argnums=0)(x, p)
+        # Full-Step update for position
+        x = x + step_size * jax.grad(hamiltonian, argnums=1)(x, p)
+        # Half-Step update for momentum
+        p = p - 0.5 * step_size * jax.grad(hamiltonian, argnums=0)(x, p)
+        return x, p
+
+    def integrate(self, x, p, hamiltonian, n_steps, step_size):
+        """
+        Generalized Leapfrog for RMHMC.
+        -------------------------
+        Parameters:
+            x (jax.Array): position
+            p (jax.Array): momentum
+            potential_fn (function): potential energy
+            metric_fn (function): G(x)
+            n_steps (int): integration steps
+            step_size (float): step size
+        -------------------------
+        Returns:
+            x (jax.Array), p (jax.Array)
+        """
+        for _ in range(n_steps):
+            x, p = self._integrator_step(x, p, hamiltonian, step_size)
+        return x, p
 
 class MultiStageSplittingIntegrator(Integrator):
     def __init__(self, stage):
