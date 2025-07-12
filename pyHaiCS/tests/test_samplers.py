@@ -358,11 +358,6 @@ class TestNonImplementedSamplers(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             haics.samplers.hamiltonian.MHMC()
 
-    @HiddenPrints
-    def test_rmhmc_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            haics.samplers.hamiltonian.RMHMC()
-
 class DummyGaussian:
     """Simple 1D Gaussian proposal distribution for testing."""
     def __init__(self, loc=0.0, scale=1.0):
@@ -434,6 +429,47 @@ class TestImportanceSampling(unittest.TestCase):
         self.assertEqual(weights.shape, (self.n_chains, self.n_samples))
         for i in range(self.n_chains):
             self.assertAlmostEqual(float(jnp.sum(weights[i])), 1.0, places=4)
+
+class TestRMHMC(unittest.TestCase):
+    """
+    Unit tests for the RMHMC sampler in pyHaiCS.
+    """
+
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x ** 2)
+
+    @staticmethod
+    def identity_metric(x):
+        # Identity metric (constant), same as Euclidean HMC
+        return jnp.eye(len(x))
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.n_steps = 3
+        self.potential = self.quadratic_potential
+        self.metric = self.identity_metric
+        self.integrator = haics.integrators.integrators.RMHMCVerletIntegrator()
+
+    @HiddenPrints
+    def test_multi_chain_output_shape(self):
+        samples = haics.samplers.hamiltonian.RMHMC(
+            self.x_init,
+            (),  # no extra args for potential
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.metric,
+            integrator=self.integrator,
+            n_chains=3,
+            RNG_key=5
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
 
 if __name__ == '__main__':
     unittest.main()

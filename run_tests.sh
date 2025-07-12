@@ -37,5 +37,8 @@ uv run -m unittest -v test_adaptive.py
 echo -e "\n${BIBlue}Running ESS Metric Tests...${Color_Off}"
 uv run -m unittest -v test_ESS.py
 
+echo -e "\n${BIBlue}Running Hamiltonian Utils Tests...${Color_Off}"
+uv run -m unittest -v test_utils_hamiltonian.py
+
 echo -e "\n${BIGreen}Finished Running All Tests!${Color_Off}\n"
 exit 0

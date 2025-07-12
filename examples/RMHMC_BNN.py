@@ -45,24 +45,24 @@ cov_mat = jnp.eye(2)
 params = jax.random.multivariate_normal(key_HMC, mean_vector, cov_mat)
 sigma_y, sigma_params = 2, 1
 
-# G_fn = fisher_metric(log_likelihood_fn, (y, sigma_y))
-G_fn = generalized_fisher_metric(log_likelihood_fn, neg_log_prior_fn, (y, sigma_y), (sigma_params,))
-
 # === Run RMHMC ===
 dim = 2
 key = jax.random.PRNGKey(0)
 
 samples = haics.samplers.hamiltonian.RMHMC(
-        x_init=params,
-        potential_args=(y, sigma_y, sigma_params),
-        n_samples=5000,
-        burn_in=1000,
-        step_size=1e-4,
-        n_steps=500,
-        potential=potential_fn,
-        metric=G_fn,
-        integrator=RMHMCVerletIntegrator(),
-        n_chains=1
+        x_init = params,
+        potential_args = (y, sigma_y, sigma_params),
+        n_samples = 5000,
+        burn_in = 2000,
+        step_size = 2.9e-3,
+        n_steps = 500,
+        potential = potential_fn,
+        metric = generalized_fisher_metric(log_likelihood_fn,
+                                         neg_log_prior_fn, 
+                                         (y, sigma_y), 
+                                         (sigma_params,)),
+        integrator = RMHMCVerletIntegrator(),
+        n_chains = 1
 )
 
 # === Visualize Sampling ===
@@ -74,12 +74,33 @@ cov_est = jnp.cov(samples.T)
 print("Posterior Mean Estimate:", mean_est)
 print("Posterior Covariance Estimate:\n", cov_est)
 
+# === Plot true density contours ===
+# Create a meshgrid over parameter space
+theta1_vals = jnp.linspace(-2, 2, 2000)
+theta2_vals = jnp.linspace(-2, 2, 2000)
+Theta1, Theta2 = jnp.meshgrid(theta1_vals, theta2_vals)
+
+# Compute unnormalized log posterior
+def unnormalized_posterior(theta1, theta2):
+    params = jnp.array([theta1, theta2])
+    return -potential_fn(y, sigma_y, sigma_params, params)
+
+log_density = jnp.vectorize(unnormalized_posterior)(Theta1, Theta2)
+log_density = log_density - jnp.max(log_density)  # for numerical stability
+density = jnp.exp(log_density)
+
 plt.figure(figsize=(6, 6))
-plt.plot(samples[:, 0], samples[:, 1], '.', alpha=0.3)
+# Plot filled contours for density above a threshold (e.g., 0.1 of peak)
+plt.contourf(Theta1, Theta2, density, levels=20, alpha=0.3)
+# Overlay RMHMC samples
+plt.plot(samples[:, 0], samples[:, 1], '.', alpha=0.2, label="RMHMC Samples", markersize=2)
 plt.xlabel(r"$\theta_1$")
 plt.ylabel(r"$\theta_2$")
-plt.title("Banana-Shaped Posterior Samples from RMHMC")
+plt.title("Banana-Shaped Density (Shaded) with RMHMC Samples")
 plt.grid(True)
 plt.axis('equal')
+plt.xlim(-1.75, 1.75)
+plt.ylim(-1.75, 1.75)
 plt.tight_layout()
+plt.savefig("banana_rmhmc_samples.png", dpi=200)
 plt.show()
