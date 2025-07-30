@@ -442,7 +442,7 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     if stage == 2:
         integrator = [MSSI_2(b) for b in opt_integration_coeffs]
     elif stage == 3:
-        a_coeffs = [(1 + 2*b)/(2*(6*b-2)) for b in opt_integration_coeffs]
+        a_coeffs = [(2*b - 1)/(2*(6*b-2)) for b in opt_integration_coeffs]
         integrator = [MSSI_3(a, b) for a, b in zip(a_coeffs, opt_integration_coeffs)]
     assert len(integrator) == n_samples_prod, "Number of integrators must be equal to number of samples"
     if sampler == "HMC":
