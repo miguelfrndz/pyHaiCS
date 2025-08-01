@@ -409,8 +409,8 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     if sampler == "GHMC":
         if stage == 2: a, b = 0, 1/4
         elif stage == 3: a, b = 1/3, 1/6
-        momentum_noise_lower = optimal_momentum_noise(2.0772, stage, x_init.shape[0], a, b)
-        momentum_noise_upper = optimal_momentum_noise(stage, stage, x_init.shape[0], a, b)
+        momentum_noise_lower = optimal_momentum_noise(stage, stage, x_init.shape[0], a, b)
+        momentum_noise_upper = optimal_momentum_noise(2.0772, stage, x_init.shape[0], a, b)
     print(f"\t- Number of Tuning Samples: {n_samples}")
     print(f"\t- Dimension of Data: {x_init.shape[0]}")
     print(f"\t- Initial Step-Size: {step_size}")
