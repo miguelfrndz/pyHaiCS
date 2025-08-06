@@ -7,6 +7,7 @@ class Integrator:
     Base class for Hamiltonian Integrators.
     """
     def __init__(self):
+        self.name = self.__class__.__name__
         pass
 
     def integrate(self, *args, **kwargs):
