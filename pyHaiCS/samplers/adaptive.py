@@ -380,7 +380,7 @@ def optimal_momentum_noise(step_size_nondim, stage, D, a = None, b = None):
 def sAIA(x_init, potential_args, n_samples_tune, n_samples_check, 
          n_samples_burn_in, n_samples_prod, potential, mass_matrix, 
          target_AR = 0.92, stage = 2, sensibility = 0.01, 
-         delta_step = 0.01, compute_freqs = True, compute_hessian = False, sampler = "HMC", RNG_key = 42):
+         delta_step = 0.01, compute_freqs = True, compute_hessian = True, sampler = "HMC", RNG_key = 42):
     """
     s-AIA: Adaptive Integration Approach for Computation Statistics.
 
@@ -401,7 +401,7 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
         sensibility (float): sensibility for acceptance rate
         delta_step (float): step size increment/decrement
         compute_freqs (bool): compute frequencies
-        compute_hessian (bool): compute hessian function
+        compute_hessian (bool): compute hessian function # FIXME: Fix case without hessian computation
         sampler (str): sampler type
         RNG_key (int): random number generator key
     -------------------------
