@@ -12,3 +12,4 @@ talbot_results/
 *.dll
 *.exe
 *.out
+pyhaics.egg-info/
