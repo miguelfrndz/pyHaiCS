@@ -74,9 +74,11 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
             samples.append(x)
             acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand = None)
             # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
-            Hessian = potential_hessian(x)
-            freqs_iter = _compute_frequencies(Hessian)
-            frequencies.append(freqs_iter)
+            if potential_hessian is not None:
+                Hessian = potential_hessian(x)
+                freqs_iter = _compute_frequencies(Hessian)
+                frequencies.append(freqs_iter)
+            else: frequencies = jax.numpy.ones(x.shape[0])
     samples, frequencies = jnp.stack(samples, axis = 0), jnp.stack(frequencies, axis = 0)
     return samples, acceptances, frequencies
 
@@ -401,7 +403,7 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
         sensibility (float): sensibility for acceptance rate
         delta_step (float): step size increment/decrement
         compute_freqs (bool): compute frequencies
-        compute_hessian (bool): compute hessian function # FIXME: Fix case without hessian computation
+        compute_hessian (bool): compute hessian function
         sampler (str): sampler type
         RNG_key (int): random number generator key
     -------------------------
