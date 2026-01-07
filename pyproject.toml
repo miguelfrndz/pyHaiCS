@@ -1,7 +1,7 @@
 [project]
 name = "pyhaics"
-version = "0.0.1"
-description = "Python Library for Hamiltonian Markov-Chain Monte-Carlo in Computational Statistics (pyHaiCS)"
+version = "0.0.2"
+description = "Python Library for Hamiltonian Markov-Chain Monte Carlo in Computational Statistics (pyHaiCS)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
