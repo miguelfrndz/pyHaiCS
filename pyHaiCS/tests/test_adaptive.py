@@ -2,7 +2,7 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs
+from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs, sMAIA
 from pyHaiCS.integrators.integrators import ME_3, VV_3
 from pyHaiCS.utils.test import HiddenPrints
 
@@ -54,6 +54,23 @@ class TestSAIA(unittest.TestCase):
             RNG_key=self.RNG_key
         )
         self.assertEqual(samples.shape, (self.n_samples_prod, 1))
+
+    @HiddenPrints
+    def test_sMAIA_MHMC_output_shape(self):
+        params_samples, params_weights = sMAIA(
+            x_init=self.x_init,
+            potential_args=self.potential_args,
+            n_samples_tune=self.n_samples_tune,
+            n_samples_check=self.n_samples_check,
+            n_samples_burn_in=self.n_samples_burn_in,
+            n_samples_prod=self.n_samples_prod,
+            potential=self.quadratic_potential,
+            mass_matrix=self.mass_matrix,
+            stage=2,
+            RNG_key=self.RNG_key
+        )
+        self.assertEqual(params_samples.shape, (self.n_samples_prod, 1))
+        self.assertEqual(params_weights.shape, (self.n_samples_prod,))
 
     @HiddenPrints
     def test_invalid_stage_raises(self):

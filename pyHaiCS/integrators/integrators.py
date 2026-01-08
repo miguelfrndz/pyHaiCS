@@ -252,3 +252,44 @@ class ME_3(MSSI_3):
 
     def integrate(self, x, p, potential_grad, n_steps, mass_matrix, step_size):
         return super().integrate(x, p, potential_grad, n_steps, mass_matrix, step_size)
+    
+def get_mhmc_coeffs(order, stage, b = None, a = None):
+    """
+    Compute coefficients for 4th or 6th order modified Hamiltonians
+    for 2-stage or 3-stage integrators based on parameters b (or a, b).
+    """
+    if order not in [4, 6]:
+        raise ValueError("Only 4th or 6th order supported")
+    if stage not in [2, 3]:
+        raise ValueError("Only 2-stage or 3-stage integrators supported")
+    if order == 4 and (b is None or a is not None):
+        raise ValueError("b must be provided for 4th order coefficients")
+    if order == 6 and (b is None or a is None):
+        raise ValueError("a and b must be provided for 6th order coefficients")
+    if stage == 2:
+        # 2-stage version
+        c21 = 1/24 * (6 * b - 1)
+        c22 = 1/12 * (6 * b ** 2 - 6 * b + 1)
+        c41 = 1/5760 * (7 - 30 * b)
+        c42 = 1/240 * (-10 * b ** 2 + 15 * b - 3)
+        c43 = 1/120 * (-30 * b ** 3 + 35 * b ** 2 - 15 * b + 2)
+        c44 = 1/240 * (20 * b ** 2 - 1)
+    elif stage == 3:
+        # 3-stage version
+        c21 = 1/12 * (1 - 6 * a * (1 - a) * (1 - 2 * b))
+        c22 = 1/24 * (6 * a * (1 - 2 * b) ** 2 - 1)
+        c41 = 1/720 * (1 + 2 * (a - 1) * a * (8 + 31 * (a - 1) * a) * (1 - 2 * b) - 4 * b)
+        c42 = 1/240 * (
+            6 * a ** 3 * (1 - 2 * b) ** 2
+            - a ** 2 * (19 - 116 * b + 36 * b ** 2 + 240 * b ** 3)
+            + a * (27 - 208 * b + 308 * b ** 2)
+            - 48 * b ** 2 + 48 * b - 7
+        )
+        c43 = 1/180 * (1 + 15 * a * (1 - 2 * b) * (-1 + 2 * a * (2 - 3 * b + a * (4 * b - 2))))
+        c44 = 1/240 * (-1 + 20 * a * (1 - 2 * b) * (b + a * (1 + 6 * (b - 1) * b)))
+
+    return {
+        "c21": c21, "c22": c22,
+        "c41": c41, "c42": c42, "c43": c43, "c44": c44
+    }
+        

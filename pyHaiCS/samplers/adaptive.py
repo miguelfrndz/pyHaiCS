@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
-from ..utils.hamiltonian import Hamiltonian
-from ..integrators.integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator
+from ..utils.hamiltonian import Hamiltonian, Modified_Hamiltonian, Extended_Hamiltonian
+from ..integrators.integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator, get_mhmc_coeffs
 from ..utils.metrics import acceptance_rate
 
 @jax.jit
@@ -295,6 +295,7 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
                                                         lambda _: step_sizes * max_freq, 
                                                         operand = None)
             elif std_dev_freq > 1:
+                fitting_factor = S_freq
                 t_ColSI = stage/(S_freq * (max_freq - std_dev_freq))
                 t_lower = h_lower/(S_freq * (max_freq - std_dev_freq))
                 # stability_limit = 2*stage/(S_freq * (max_freq - std_dev_freq))
@@ -490,15 +491,210 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
         integrator = [MSSI_3(a, b) for a, b in zip(a_coeffs, opt_integration_coeffs)]
     assert len(integrator) == n_samples_prod, "Number of integrators must be equal to number of samples"
     if sampler == "HMC":
-        samples, _, _ = _sAIA_HMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
+        samples, AR_prod, _ = _sAIA_HMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
                                 n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
                                 potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
                                 integrator = integrator, key = jax.random.PRNGKey(RNG_key), phase_name = "Production")
     elif sampler == "GHMC":
-        samples, _, _ = _sAIA_GHMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
+        samples, AR_prod, _ = _sAIA_GHMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
                                 n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
                                 potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
                                 momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
                                 integrator = integrator, key = jax.random.PRNGKey(RNG_key), phase_name = "Production")
     print("="*61)
+    print(f"Production stage finished, production acceptance rate: {AR_prod}.")
     return samples
+
+def _sMAIA_MHMC(x_init, n_samples, burn_in, step_size, n_steps, 
+                potential, potential_grad, potential_hessian, mass_matrix, 
+                momentum_noise, integrator, order, key, phase_name):
+    """
+    Single-Chain Modified Hamiltonian Monte-Carlo (MHMC) sampler for s-MAIA.
+    This function is adapted for the adaptive framework, handling dynamic
+    step sizes, integrators, and momentum noise.
+    """
+    # Ensure step_size, n_steps, and integrator are lists for adaptive sampling
+    if isinstance(step_size, (int, float)):
+        step_size = [step_size] * n_samples
+    if isinstance(n_steps, int):
+        n_steps = [n_steps] * n_samples
+    if isinstance(integrator, Integrator):
+        integrator = [integrator] * n_samples
+    if isinstance(momentum_noise, (int, float)):
+        momentum_noise = [momentum_noise] * n_samples
+
+    samples = []
+    weights = []
+    frequencies = []
+    acceptances = 0
+    x = x_init
+    # Initial momentum (gaussian), shape given by mass matrix
+    p = jax.random.multivariate_normal(key, jnp.zeros(x.shape[0]), mass_matrix)
+    for n in tqdm(range(n_samples + burn_in), desc=f"\t- Running {phase_name} Phase MHMC", ncols=100):
+        key, subkey1, subkey2, subkey3 = jax.random.split(key, 4)
+        # Get current adaptive parameters for this step
+        current_idx = min(n - burn_in, n_samples - 1) if n >= burn_in else 0
+        current_step_size = step_size[current_idx]
+        current_n_steps = n_steps[current_idx]
+        current_integrator = integrator[current_idx]
+        current_momentum_noise = momentum_noise[current_idx]
+        # Get coefficients for the Modified Hamiltonian
+        c = get_mhmc_coeffs(order=order, stage=current_integrator.stage, 
+                            b=current_integrator.b, a=getattr(current_integrator, 'a', None))
+        # Sample noise vector
+        mu = jax.random.multivariate_normal(subkey1, jnp.zeros(x.shape[0]), mass_matrix)
+        # Propose updated momentum and noise vector
+        p_prop = jnp.sqrt(1 - current_momentum_noise) * p + jnp.sqrt(current_momentum_noise) * mu
+        mu_prop = -jnp.sqrt(current_momentum_noise) * p + jnp.sqrt(1 - current_momentum_noise) * mu
+        # Compute Modified Hamiltonians
+        H_old = Modified_Hamiltonian(x, p, potential, potential_grad, potential_hessian, mass_matrix, current_step_size, order, c)
+        H_prop = Modified_Hamiltonian(x, p_prop, potential, potential_grad, potential_hessian, mass_matrix, current_step_size, order, c)
+        # Compute Difference of Extended Hamiltonians
+        dH_ext = Extended_Hamiltonian(H_prop, mu_prop, mass_matrix) - Extended_Hamiltonian(H_old, mu, mass_matrix)
+        # Metropolis-Hastings acceptance (for momentum)
+        accept_momentum = jax.random.uniform(subkey2) < jnp.exp(-dH_ext)
+        p_accepted = jax.lax.cond(accept_momentum, lambda: p_prop, lambda: p)
+        # Integrate Hamiltonian dynamics with accepted momentum
+        x_new, p_new = current_integrator.integrate(x, p_accepted, potential_grad, current_n_steps, mass_matrix, current_step_size)
+        # Compute Difference of Modified Hamiltonians
+        H_initial_step = Modified_Hamiltonian(x, p_accepted, potential, potential_grad, potential_hessian, mass_matrix, current_step_size, order, c)
+        H_final_step = Modified_Hamiltonian(x_new, p_new, potential, potential_grad, potential_hessian, mass_matrix, current_step_size, order, c)
+        dH = H_final_step - H_initial_step
+        # Metropolis-Hastings acceptance (for position)
+        accept_position = jax.random.uniform(subkey3) < jnp.exp(-dH)
+        x, p = jax.lax.cond(accept_position, lambda: (x_new, p_new), lambda: (x, -p_accepted))
+        if n >= burn_in:
+            acceptances += jax.lax.cond(accept_position, lambda: 1, lambda: 0)
+            samples.append(x)
+            # Compute importance sampling weights
+            weight = jnp.exp(Hamiltonian(x, p, potential, mass_matrix) - 
+                             Modified_Hamiltonian(x, p, potential, potential_grad, potential_hessian, mass_matrix, current_step_size, order, c))
+            weights.append(weight)
+            # Compute frequencies for adaptive tuning
+            Hessian = potential_hessian(x)
+            frequencies.append(_compute_frequencies(Hessian))
+    return (jnp.stack(samples), jnp.stack(weights), acceptances, jnp.stack(frequencies) if frequencies else jnp.array([]))
+
+def sMAIA(x_init, potential_args, n_samples_tune, n_samples_check, 
+          n_samples_burn_in, n_samples_prod, potential, mass_matrix, 
+          target_AR=0.92, stage=2, sensibility=0.01, 
+          delta_step=0.01, compute_freqs=True, order=4, RNG_key=42):
+    """
+    s-MAIA: Standalone implementation of s-AIA for the MHMC sampler.
+
+    This function follows the three-phase adaptive integration scheme:
+    1. Tuning: Finds an optimal initial step-size.
+    2. Burn-In: Estimates system frequencies to create adaptive parameters.
+    3. Production: Runs the final MHMC sampling with adaptive step-sizes
+       and integrators.
+   
+    Note: As of this version the s-MAIA method is only supported for 2- & 3-stage
+    Splitting Integrators with Modified Hamiltonian Monte-Carlo (MHMC) sampling.
+    -------------------------
+    Parameters:
+        x_init (jax.Array): initial position
+        potential_args (tuple): arguments for Hamiltonian potential
+        n_samples_tune (int): number of samples for tuning
+        n_samples_check (int): number of samples for checking acceptance rate
+        n_samples_burn_in (int): number of samples for burn-in
+        n_samples_prod (int): number of samples for production
+        potential (function): Hamiltonian potential
+        mass_matrix (jax.Array): mass matrix
+        target_AR (float): target acceptance rate
+        stage (int): number of stages (2 or 3)
+        sensibility (float): sensibility for acceptance rate
+        delta_step (float): step size increment/decrement
+        compute_freqs (bool): compute frequencies for adaptive tuning
+        order (int): order of the Modified Hamiltonian (default is 4)
+        RNG_key (int): random number generator key
+    -------------------------
+    Returns:
+        samples (jax.Array): samples from the MHMC sampler
+    """
+    print("Running s-MAIA (s-AIA for MHMC) Adaptive Integration Scheme...")
+    print("="*61)
+    print(f"{'Sampler':^30}|{'MHMC':^30}")
+    print(f"{'Num. Samples Tune':^30}|{n_samples_tune:^30}")
+    print(f"{'Num. Samples Check':^30}|{n_samples_check:^30}")
+    print(f"{'Num. Samples Burn-In':^30}|{n_samples_burn_in:^30}")
+    print(f"{'Num. Samples Prod':^30}|{n_samples_prod:^30}")
+    print(f"{'Stage':^30}|{stage:^30}")
+    print(f"{'Target AR':^30}|{target_AR:^30}")
+    print(f"{'Sensibility':^30}|{sensibility:^30}")
+    print(f"{'Delta Step':^30}|{delta_step:^30}")
+    print(f"{'Compute Freqs':^30}|{('Yes' if compute_freqs else 'No'):^30}")
+    print(f"{'Order of Modified Hamiltonian':^30}|{order:^30}")
+    print("="*61)
+
+    # JIT compile potential and its derivatives
+    potential = jax.jit(jax.tree_util.Partial(potential, *potential_args))
+    potential_grad = jax.jit(jax.grad(potential))
+    potential_hessian = jax.jit(jax.hessian(potential))
+    key = jax.random.PRNGKey(RNG_key)
+
+    # === 1. Tuning Stage ===
+    print("1) Tuning Stage...")
+    # Use GHMC for efficient initial tuning
+    initial_step_size, n_steps = 1.0 / x_init.shape[0], 1
+    if stage == 2: a_tune, b_tune = 0, 1/4
+    elif stage == 3: a_tune, b_tune = 1/3, 1/6
+    print(f"\t- Number of Tuning Samples: {n_samples_tune}")
+    print(f"\t- Dimension of Data: {x_init.shape[0]}")
+    print(f"\t- Initial Step-Size: {initial_step_size}")
+    
+    momentum_noise_lower = optimal_momentum_noise(stage, stage, x_init.shape[0], a_tune, b_tune)
+    momentum_noise_upper = optimal_momentum_noise(2.0772, stage, x_init.shape[0], a_tune, b_tune)
+    
+    print(f"\t- Initial Momentum Noise (Lower Bound): {momentum_noise_lower}")
+    print(f"\t- Initial Momentum Noise (Upper Bound): {momentum_noise_upper}")
+    # Tune the step size using the adaptive tuning function
+    tuned_step_size, AR_tuned = _sAIA_Tuning(
+        x_init, n_samples_tune, n_samples_check, initial_step_size, n_steps, sensibility,
+        target_AR, potential, potential_grad, potential_hessian, mass_matrix,
+        delta_step, VerletIntegrator(), "GHMC", momentum_noise_lower,
+        momentum_noise_upper, key)
+    print(f"\t- Tuned AR: {AR_tuned}")
+    print(f"\t- Tuned Step-Size: {tuned_step_size}")
+    print("="*61)
+    # === 2. Burn-In Stage ===
+    print("2) Burn-In Stage...")
+    # Run MHMC to estimate frequencies with the tuned step size
+    key, subkey = jax.random.split(key)
+    burn_in_integrator = VerletIntegrator()
+    # Use frequency information to compute adaptive parameters for the production run
+    dimensionless_step_sizes, step_sizes, _ = _sAIA_BurnIn(
+         x_init, n_samples_burn_in, n_samples_prod, compute_freqs, tuned_step_size, n_steps,
+         stage, potential, potential_grad, potential_hessian, mass_matrix,
+         burn_in_integrator, "GHMC", momentum_noise_lower, momentum_noise_upper, key)
+    
+    opt_integration_coeffs = _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, RNG_key)
+    print("\t- Dimensionless Step-Sizes computed.")
+    print("\t- Optimal Integration Coefficients computed.")
+    print("="*61)
+
+    # === 3. Production Stage ===
+    print("3) Production Stage...")
+    key, subkey1, subkey2 = jax.random.split(key, 3)
+    
+    # Create adaptive integrators and step numbers for the production run
+    prod_steps = jax.random.randint(subkey1, shape=(n_samples_prod,), minval=1, maxval=jnp.maximum(2, 2 * (x_init.shape[0] / step_sizes) - 1))
+    
+    if stage == 2:
+        prod_integrators = [MSSI_2(b) for b in opt_integration_coeffs]
+    else: # stage == 3
+        a_coeffs = [(2 * b - 1) / (2 * (6 * b - 2)) for b in opt_integration_coeffs]
+        prod_integrators = [MSSI_3(a, b) for a, b in zip(a_coeffs, opt_integration_coeffs)]
+    
+    # Use adaptive momentum noise for production run
+    momentum_noise_prod = jax.random.uniform(subkey2, shape=(n_samples_prod,)) * (momentum_noise_upper - momentum_noise_lower) + momentum_noise_lower
+
+    # Run the final production sampling with all adaptive parameters
+    samples, weights, _, _ = _sMAIA_MHMC(
+        x_init, n_samples_prod, 100, step_sizes, prod_steps,
+        potential, potential_grad, potential_hessian, mass_matrix,
+        momentum_noise_prod, prod_integrators, order, key, "Production")
+    
+    print("="*61)
+    print("s-MAIA sampling complete.")
+    
+    return samples, weights

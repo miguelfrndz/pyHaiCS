@@ -352,11 +352,49 @@ class TestSLDMC(unittest.TestCase):
         )
         self.assertEqual(samples.shape, (3, self.n_samples, 1))
 
-class TestNonImplementedSamplers(unittest.TestCase):
+class TestMHMC(unittest.TestCase):
+    @staticmethod
+    def quadratic_potential(x):
+        return 0.5 * jnp.sum(x**2)
+
+    def setUp(self):
+        self.x_init = jnp.array([0.0])
+        self.n_samples = 10
+        self.burn_in = 5
+        self.step_size = 0.1
+        self.n_steps = 3
+        self.mass_matrix = jnp.eye(1)
+        self.momentum_noise = 0.5
+        self.key = jax.random.PRNGKey(0)
+        self.potential = self.quadratic_potential
+        self.integrator = haics.integrators.integrators.VerletIntegrator()
+
     @HiddenPrints
-    def test_mhmc_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            haics.samplers.hamiltonian.MHMC()
+    def test_multi_chain_output_shape(self):
+        samples, weights = haics.samplers.hamiltonian.MHMC(
+            self.x_init,
+            (),
+            self.n_samples,
+            self.burn_in,
+            self.step_size,
+            self.n_steps,
+            self.potential,
+            self.mass_matrix,
+            self.momentum_noise,
+            integrator=haics.integrators.VV_3(),
+            order=6,
+            n_chains=3,
+            RNG_key=0
+        )
+        self.assertEqual(samples.shape, (3, self.n_samples, 1))
+        self.assertEqual(weights.shape, (3, self.n_samples))
+
+class TestNonImplementedSamplers(unittest.TestCase):
+    pass
+    # @HiddenPrints
+    # def test_mhmc_raises_not_implemented(self):
+    #     with self.assertRaises(NotImplementedError):
+    #         haics.samplers.hamiltonian.MHMC()
 
 class DummyGaussian:
     """Simple 1D Gaussian proposal distribution for testing."""
