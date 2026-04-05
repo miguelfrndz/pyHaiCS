@@ -55,12 +55,42 @@ def build_breast_cancer_problem(seed):
     return params, X_train, y_train, X_test, y_test
 
 
-def normalized_ess_summary(samples, estimator):
+def run_independent_chains(single_chain_fn, n_chains, base_seed):
+    chains = []
+    for chain_idx in range(n_chains):
+        chains.append(single_chain_fn(base_seed + chain_idx))
+    return jnp.stack(chains, axis = 0)
+
+
+def ensure_chain_shape(samples):
     if samples.ndim == 2:
         samples = samples[None, :, :]
-    ess = haics.utils.metrics.geyerESS(samples, thres_estimator = estimator, normalize = True)
-    ess = jnp.ravel(ess)
-    return float(jnp.min(ess)), float(jnp.mean(ess)), float(jnp.max(ess))
+    return samples
+
+
+def summarize_array(values):
+    values = jnp.ravel(values)
+    values = values[jnp.isfinite(values)]
+    if values.size == 0:
+        return float("nan"), float("nan"), float("nan")
+    return float(jnp.min(values)), float(jnp.mean(values)), float(jnp.max(values))
+
+
+def safe_multi_ess_summary(samples):
+    try:
+        pooled = haics.utils.metrics.multiESS(samples, normalize = True, combined = True)
+        value = float(jnp.asarray(pooled))
+        return value, value, value
+    except ValueError:
+        return float("nan"), float("nan"), float("nan")
+
+
+def pacf_summary(samples, lags):
+    pacf_values = jnp.abs(haics.utils.metrics.PACF(samples, max_lag = max(lags)))
+    summary = {}
+    for lag in lags:
+        summary[lag] = summarize_array(pacf_values[:, :, lag])
+    return summary
 
 
 def predictive_accuracy(samples, X_test, y_test):
@@ -71,17 +101,32 @@ def predictive_accuracy(samples, X_test, y_test):
     return float(jnp.mean(mean_preds == y_test))
 
 
-def run_and_summarize(name, fn, estimator, X_test, y_test):
+def run_and_summarize(name, fn, estimator, pacf_lags, X_test, y_test):
     start = time.perf_counter()
     samples = fn()
     runtime = time.perf_counter() - start
-    min_ess, mean_ess, max_ess = normalized_ess_summary(samples, estimator)
+    samples = ensure_chain_shape(samples)
+    ess_raw = haics.utils.metrics.geyerESS(samples, thres_estimator = estimator, normalize = False)
+    ess_norm = haics.utils.metrics.geyerESS(samples, thres_estimator = estimator, normalize = True)
+    coda_ess_norm = haics.utils.metrics.codaESS(samples, method = "monotone-sequence", normalize = True)
+    multi_ess_norm = safe_multi_ess_summary(samples)
+    psrf = summarize_array(haics.utils.metrics.PSRF(samples))
+    mcse = haics.utils.metrics.MCSE(samples, ess_raw)
+    iact = haics.utils.metrics.IACT(samples, ess_raw, normalized_ESS = False)
+    pacf = pacf_summary(samples, pacf_lags)
+    min_ess, mean_ess, max_ess = summarize_array(ess_norm)
     accuracy = predictive_accuracy(samples, X_test, y_test)
     return {
         "name": name,
         "min_ess": min_ess,
         "mean_ess": mean_ess,
         "max_ess": max_ess,
+        "coda_ess": summarize_array(coda_ess_norm),
+        "multi_ess": multi_ess_norm,
+        "psrf": psrf,
+        "mcse": summarize_array(mcse),
+        "iact": summarize_array(iact),
+        "pacf": pacf,
         "accuracy": accuracy,
         "runtime": runtime,
     }
@@ -92,8 +137,9 @@ def main():
         description = "Compare normalized ESS for HMC, GHMC and s-AIA on Bayesian logistic regression."
     )
     parser.add_argument("--seed", type = int, default = 42)
+    parser.add_argument("--n-chains", type = int, default = 4)
     parser.add_argument("--stage", type = int, default = 3, choices = [2, 3])
-    parser.add_argument("--ess-estimator", type = str, default = "var_trunc")
+    parser.add_argument("--ess-estimator", type = str, default = "IMSE")
     parser.add_argument("--n-samples", type = int, default = 1000)
     parser.add_argument("--burn-in", type = int, default = 200)
     parser.add_argument("--hmc-step-size", type = float, default = 1e-3)
@@ -105,7 +151,9 @@ def main():
     parser.add_argument("--saia-check", type = int, default = 100)
     parser.add_argument("--saia-burn-in", type = int, default = 600)
     parser.add_argument("--saia-prod", type = int, default = 1000)
+    parser.add_argument("--pacf-lags", type = str, default = "1,5,10")
     args = parser.parse_args()
+    pacf_lags = [int(lag.strip()) for lag in args.pacf_lags.split(",") if lag.strip()]
 
     params, X_train, y_train, X_test, y_test = build_breast_cancer_problem(args.seed)
     mass_matrix = jnp.eye(X_train.shape[1])
@@ -123,7 +171,7 @@ def main():
                 potential = neg_log_posterior_fn,
                 mass_matrix = mass_matrix,
                 integrator = haics.integrators.VerletIntegrator(),
-                n_chains = 1,
+                n_chains = args.n_chains,
                 RNG_key = args.seed,
             ),
         ),
@@ -140,56 +188,64 @@ def main():
                 mass_matrix = mass_matrix,
                 momentum_noise = args.ghmc_momentum_noise,
                 integrator = haics.integrators.VerletIntegrator(),
-                n_chains = 1,
+                n_chains = args.n_chains,
                 RNG_key = args.seed,
             ),
         ),
         (
             "s-AIA (HMC)",
-            lambda: haics.samplers.adaptive.sAIA(
-                params,
-                potential_args = (X_train, y_train),
-                n_samples_tune = args.saia_tune,
-                n_samples_check = args.saia_check,
-                n_samples_burn_in = args.saia_burn_in,
-                n_samples_prod = args.saia_prod,
-                potential = neg_log_posterior_fn,
-                mass_matrix = mass_matrix,
-                target_AR = 0.92,
-                stage = args.stage,
-                sensibility = 0.01,
-                delta_step = 0.01,
-                compute_freqs = True,
-                compute_hessian = True,
-                sampler = "HMC",
-                RNG_key = args.seed,
+            lambda: run_independent_chains(
+                lambda seed: haics.samplers.adaptive.sAIA(
+                    params,
+                    potential_args = (X_train, y_train),
+                    n_samples_tune = args.saia_tune,
+                    n_samples_check = args.saia_check,
+                    n_samples_burn_in = args.saia_burn_in,
+                    n_samples_prod = args.saia_prod,
+                    potential = neg_log_posterior_fn,
+                    mass_matrix = mass_matrix,
+                    target_AR = 0.92,
+                    stage = args.stage,
+                    sensibility = 0.01,
+                    delta_step = 0.01,
+                    compute_freqs = True,
+                    compute_hessian = True,
+                    sampler = "HMC",
+                    RNG_key = seed,
+                ),
+                n_chains = args.n_chains,
+                base_seed = args.seed + 1_000,
             ),
         ),
         (
             "s-AIA (GHMC)",
-            lambda: haics.samplers.adaptive.sAIA(
-                params,
-                potential_args = (X_train, y_train),
-                n_samples_tune = args.saia_tune,
-                n_samples_check = args.saia_check,
-                n_samples_burn_in = args.saia_burn_in,
-                n_samples_prod = args.saia_prod,
-                potential = neg_log_posterior_fn,
-                mass_matrix = mass_matrix,
-                target_AR = 0.92,
-                stage = args.stage,
-                sensibility = 0.01,
-                delta_step = 0.01,
-                compute_freqs = True,
-                compute_hessian = True,
-                sampler = "GHMC",
-                RNG_key = args.seed,
+            lambda: run_independent_chains(
+                lambda seed: haics.samplers.adaptive.sAIA(
+                    params,
+                    potential_args = (X_train, y_train),
+                    n_samples_tune = args.saia_tune,
+                    n_samples_check = args.saia_check,
+                    n_samples_burn_in = args.saia_burn_in,
+                    n_samples_prod = args.saia_prod,
+                    potential = neg_log_posterior_fn,
+                    mass_matrix = mass_matrix,
+                    target_AR = 0.92,
+                    stage = args.stage,
+                    sensibility = 0.01,
+                    delta_step = 0.01,
+                    compute_freqs = True,
+                    compute_hessian = True,
+                    sampler = "GHMC",
+                    RNG_key = seed,
+                ),
+                n_chains = args.n_chains,
+                base_seed = args.seed + 2_000,
             ),
         ),
     ]
 
     results = [
-        run_and_summarize(name, fn, args.ess_estimator, X_test, y_test)
+        run_and_summarize(name, fn, args.ess_estimator, pacf_lags, X_test, y_test)
         for name, fn in runs
     ]
 
@@ -204,6 +260,27 @@ def main():
             f"{result['accuracy']:>10.4f} "
             f"{result['runtime']:>10.2f}"
         )
+
+    print()
+    print(f"{'Sampler':<14} {'mean CODA':>12} {'pooled multiESS':>16} {'mean PSRF':>12} {'mean MCSE':>12} {'mean IACT':>12}")
+    print("-" * 92)
+    for result in results:
+        print(
+            f"{result['name']:<14} "
+            f"{result['coda_ess'][1]:>12.4f} "
+            f"{result['multi_ess'][1]:>14.4f} "
+            f"{result['psrf'][1]:>12.4f} "
+            f"{result['mcse'][1]:>12.4f} "
+            f"{result['iact'][1]:>12.4f}"
+        )
+
+    print()
+    pacf_headers = " ".join([f"PACF@{lag:>2}".rjust(12) for lag in pacf_lags])
+    print(f"{'Sampler':<14} {pacf_headers}")
+    print("-" * (16 + 13 * len(pacf_lags)))
+    for result in results:
+        pacf_means = " ".join([f"{result['pacf'][lag][1]:>12.4f}" for lag in pacf_lags])
+        print(f"{result['name']:<14} {pacf_means}")
 
 
 if __name__ == "__main__":

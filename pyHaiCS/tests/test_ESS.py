@@ -8,7 +8,7 @@ PYHAICS_PATH = Path(__file__).parents[2]
 sys.path.append(str(PYHAICS_PATH))
 
 import pyHaiCS as haics
-from pyHaiCS.utils.metrics import geyerESS, multiESS, codaESS
+from pyHaiCS.utils.metrics import geyerESS, multiESS, codaESS, importance_sample_size
 
 class TestEffectiveSampleSizes(unittest.TestCase):
     @classmethod
@@ -72,6 +72,15 @@ class TestEffectiveSampleSizes(unittest.TestCase):
         ess = codaESS(self.aligned_samples, method='monotone-sequence')
         self.assertTrue(jnp.all(ess > 0), "codaESS contains non-positive values.")
         self.assertEqual(ess.shape[-1], self.aligned_samples.shape[-1])
+
+    def test_weighted_ess_is_capped_by_importance_weights(self):
+        weights = jnp.linspace(1.0, 0.1, self.aligned_samples.shape[1])
+        weighted_ess = geyerESS(self.aligned_samples, weights=weights, normalize=False)
+        unweighted_ess = geyerESS(self.aligned_samples, normalize=False)
+        weight_cap = importance_sample_size(weights, normalize=False)[0]
+
+        self.assertTrue(jnp.all(weighted_ess <= unweighted_ess + 1e-8))
+        self.assertTrue(jnp.all(weighted_ess <= weight_cap + 1e-8))
 
 if __name__ == '__main__':
     unittest.main()
