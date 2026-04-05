@@ -1,4 +1,5 @@
 import jax
+import numpy as np
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
@@ -17,12 +18,73 @@ def _compute_frequencies(Hessian):
     Returns:
         freqs (jax.Array): frequencies
     """
-    freqs = jnp.sqrt(jnp.linalg.eigvals(Hessian))
-    return freqs
+    Hessian = 0.5 * (Hessian + Hessian.T)
+    eigvals = jnp.linalg.eigvalsh(Hessian)
+    return jnp.sqrt(jnp.clip(eigvals, a_min = 0.0))
+
+
+def _expand_schedule(values, n_samples, name):
+    if isinstance(values, Integrator):
+        values = [values] * n_samples
+    elif isinstance(values, (int, float)):
+        values = [values] * n_samples
+    elif isinstance(values, jax.Array) and values.ndim == 0:
+        values = [values] * n_samples
+    else:
+        values = list(values)
+
+    if len(values) != n_samples:
+        raise ValueError(f"{name} must have length {n_samples}")
+    return values
+
+
+@partial(jax.jit, static_argnums=(2,))
+def _integrate_mssi_2(x, p, potential_grad, n_steps, mass_matrix, step_size, b):
+    def body_fun(_, state):
+        x, p = state
+        p = p - step_size * b * potential_grad(x)
+        x = x + (step_size / 2) * jnp.linalg.solve(mass_matrix, p)
+        p = p - step_size * (1 - 2 * b) * potential_grad(x)
+        x = x + (step_size / 2) * jnp.linalg.solve(mass_matrix, p)
+        p = p - step_size * b * potential_grad(x)
+        return x, p
+
+    return jax.lax.fori_loop(0, n_steps, body_fun, (x, p))
+
+
+@partial(jax.jit, static_argnums=(2,))
+def _integrate_mssi_3(x, p, potential_grad, n_steps, mass_matrix, step_size, a, b):
+    def body_fun(_, state):
+        x, p = state
+        p = p - step_size * b * potential_grad(x)
+        x = x + step_size * a * jnp.linalg.solve(mass_matrix, p)
+        p = p - step_size * (0.5 - b) * potential_grad(x)
+        x = x + step_size * (1 - 2 * a) * jnp.linalg.solve(mass_matrix, p)
+        p = p - step_size * (0.5 - b) * potential_grad(x)
+        x = x + step_size * a * jnp.linalg.solve(mass_matrix, p)
+        p = p - step_size * b * potential_grad(x)
+        return x, p
+
+    return jax.lax.fori_loop(0, n_steps, body_fun, (x, p))
+
+
+def _integrate_adaptive_step(x, p, potential_grad, n_steps, mass_matrix, step_size, integrator_spec):
+    if isinstance(integrator_spec, Integrator):
+        return integrator_spec.integrate(x, p, potential_grad, n_steps, mass_matrix, step_size)
+
+    stage = integrator_spec[0]
+    if stage == 2:
+        _, b = integrator_spec
+        return _integrate_mssi_2(x, p, potential_grad, n_steps, mass_matrix, step_size, b)
+    if stage == 3:
+        _, a, b = integrator_spec
+        return _integrate_mssi_3(x, p, potential_grad, n_steps, mass_matrix, step_size, a, b)
+    raise NotImplementedError(f"Unsupported adaptive integrator stage: {stage}")
 
 
 def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps, 
-    potential, potential_grad, potential_hessian, mass_matrix, integrator, key, phase_name):
+    potential, potential_grad, potential_hessian, mass_matrix, integrator, key, phase_name,
+    return_state = False):
     """
     Single-Chain Hamiltonian Monte-Carlo (HMC) sampler (for s-AIA).
     -------------------------
@@ -40,46 +102,43 @@ def _sAIA_HMC(x_init, n_samples, burn_in, step_size, n_steps,
     Returns:
     samples (jax.Array): samples
     """
-    # Ensure step_size and n_steps are lists of the correct length
-    if isinstance(step_size, (int, float)):
-        step_size = [step_size] * n_samples
-    if isinstance(n_steps, int):
-        n_steps = [n_steps] * n_samples
-    if isinstance(integrator, Integrator):
-        integrator = [integrator] * n_samples
-    assert len(step_size) == n_samples, "step_size must have length n_samples"
-    assert len(n_steps) == n_samples, "n_steps must have length n_samples"
-    assert len(integrator) == n_samples, "integrator must have length n_samples"
+    step_size = _expand_schedule(step_size, n_samples, "step_size")
+    n_steps = _expand_schedule(n_steps, n_samples, "n_steps")
+    integrator = _expand_schedule(integrator, n_samples, "integrator")
 
     samples = []
     frequencies = []
     acceptances = 0
     x = x_init
     for n in tqdm(range(n_samples + burn_in), desc = f"\t- Running {phase_name} Phase HMC", ncols = 100):
-        key, subkey = jax.random.split(key)
+        key, momentum_key, accept_key = jax.random.split(key, 3)
         # Initial momentum (gaussian), shape given by mass matrix
-        p = jax.random.multivariate_normal(subkey, jnp.zeros(x.shape[0]), mass_matrix)
+        p = jax.random.multivariate_normal(momentum_key, jnp.zeros(x.shape[0]), mass_matrix)
         # Integrate Hamiltonian dynamics
-        current_step_size = step_size[min(n - burn_in, n_samples - 1)] if n >= burn_in else step_size[0]
-        current_n_steps = n_steps[min(n - burn_in, n_samples - 1)] if n >= burn_in else n_steps[0]
-        current_integrator = integrator[min(n - burn_in, n_samples - 1)] if n >= burn_in else integrator[0]
-        x_prop, p_prop = current_integrator.integrate(x, p, potential_grad, current_n_steps, mass_matrix, current_step_size)
+        current_idx = min(n - burn_in, n_samples - 1) if n >= burn_in else 0
+        current_step_size = step_size[current_idx]
+        current_n_steps = int(n_steps[current_idx])
+        current_integrator = integrator[current_idx]
+        x_prop, p_prop = _integrate_adaptive_step(x, p, potential_grad, current_n_steps, mass_matrix, current_step_size, current_integrator)
         # Compute energy error
         delta_H = Hamiltonian(x_prop, p_prop, potential, mass_matrix) - Hamiltonian(x, p, potential, mass_matrix)
         # Metropolis-Hastings acceptance
-        accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
+        accept = jax.random.uniform(accept_key) < jnp.exp(-delta_H)
         # If acceptance, add one to acceptances
         x = jax.lax.cond(accept, lambda _: x_prop, lambda _: x, operand = None)
         if n >= burn_in:
             samples.append(x)
-            acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand = None)
-            # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
+            acceptances += int(accept)
             if potential_hessian is not None:
                 Hessian = potential_hessian(x)
                 freqs_iter = _compute_frequencies(Hessian)
-                frequencies.append(freqs_iter)
-            else: frequencies = jax.numpy.ones(x.shape[0])
-    samples, frequencies = jnp.stack(samples, axis = 0), jnp.stack(frequencies, axis = 0)
+            else:
+                freqs_iter = jnp.ones(x.shape[0])
+            frequencies.append(freqs_iter)
+    samples = jnp.stack(samples, axis = 0)
+    frequencies = jnp.stack(frequencies, axis = 0)
+    if return_state:
+        return samples, acceptances, frequencies, x, None, key
     return samples, acceptances, frequencies
 
 def _sAIA_GHMC(x_init, n_samples, burn_in, step_size, n_steps, 
@@ -103,55 +162,62 @@ def _sAIA_GHMC(x_init, n_samples, burn_in, step_size, n_steps,
     Returns:
     samples (jax.Array): samples
     """
-    # Ensure step_size and n_steps are lists of the correct length
-    if isinstance(step_size, (int, float)):
-        step_size = [step_size] * n_samples
-    if isinstance(n_steps, int):
-        n_steps = [n_steps] * n_samples
-    if isinstance(integrator, Integrator):
-        integrator = [integrator] * n_samples
-    # Sample momentum noise from uniform distribution in [momentum_noise_lower, momentum_noise_upper]
-    momentum_noise = jax.random.uniform(key, shape = (n_samples, )) * (momentum_noise_upper - momentum_noise_lower) + momentum_noise_lower
-    assert len(step_size) == n_samples, "step_size must have length n_samples"
-    assert len(n_steps) == n_samples, "n_steps must have length n_samples"
-    assert len(integrator) == n_samples, "integrator must have length n_samples"
-    assert len(momentum_noise) == n_samples, "momentum_noise must have length n_samples"
+    return _sAIA_GHMC_stateful(
+        x_init, None, n_samples, burn_in, step_size, n_steps, potential, potential_grad,
+        potential_hessian, mass_matrix, momentum_noise_lower, momentum_noise_upper,
+        integrator, key, phase_name, return_state = False
+    )
+
+
+def _sAIA_GHMC_stateful(x_init, p_init, n_samples, burn_in, step_size, n_steps,
+    potential, potential_grad, potential_hessian, mass_matrix, momentum_noise_lower,
+    momentum_noise_upper, integrator, key, phase_name, return_state = False):
+    step_size = _expand_schedule(step_size, n_samples, "step_size")
+    n_steps = _expand_schedule(n_steps, n_samples, "n_steps")
+    integrator = _expand_schedule(integrator, n_samples, "integrator")
+    noise_lower = jnp.minimum(momentum_noise_lower, momentum_noise_upper)
+    noise_upper = jnp.maximum(momentum_noise_lower, momentum_noise_upper)
+    key, momentum_noise_key, momentum_key = jax.random.split(key, 3)
+    momentum_noise = jax.random.uniform(momentum_noise_key, shape = (n_samples, )) * (noise_upper - noise_lower) + noise_lower
 
     samples = []
     frequencies = []
     acceptances = 0
     x = x_init
-    # Initial momentum (gaussian), shape given by mass matrix
-    p = jax.random.multivariate_normal(key, jnp.zeros(x.shape[0]), mass_matrix)
+    p = p_init if p_init is not None else jax.random.multivariate_normal(momentum_key, jnp.zeros(x.shape[0]), mass_matrix)
     for n in tqdm(range(n_samples + burn_in), desc=f"\t- Running {phase_name} Phase GHMC", ncols=100):
-        key, subkey = jax.random.split(key)
+        key, noise_key, accept_key = jax.random.split(key, 3)
         # Sample noise vector
-        mu = jax.random.multivariate_normal(subkey, jnp.zeros(x.shape[0]), mass_matrix)
+        mu = jax.random.multivariate_normal(noise_key, jnp.zeros(x.shape[0]), mass_matrix)
         # Propose updated momentum and noise vector
-        current_momentum_noise = momentum_noise[min(n - burn_in, n_samples - 1)] if n >= burn_in else momentum_noise[0]
+        current_idx = min(n - burn_in, n_samples - 1) if n >= burn_in else 0
+        current_momentum_noise = momentum_noise[current_idx]
         p_prop = jnp.sqrt(1 - current_momentum_noise) * p + jnp.sqrt(current_momentum_noise) * mu
         mu_prop = -jnp.sqrt(current_momentum_noise) * p + jnp.sqrt(1 - current_momentum_noise) * mu
         # Integrate Hamiltonian dynamics
-        current_step_size = step_size[min(n - burn_in, n_samples - 1)] if n >= burn_in else step_size[0]
-        current_n_steps = n_steps[min(n - burn_in, n_samples - 1)] if n >= burn_in else n_steps[0]
-        current_integrator = integrator[min(n - burn_in, n_samples - 1)] if n >= burn_in else integrator[0]
-        x_new, p_new = current_integrator.integrate(x, p_prop, potential_grad, current_n_steps, mass_matrix, current_step_size)
+        current_step_size = step_size[current_idx]
+        current_n_steps = int(n_steps[current_idx])
+        current_integrator = integrator[current_idx]
+        x_new, p_new = _integrate_adaptive_step(x, p_prop, potential_grad, current_n_steps, mass_matrix, current_step_size, current_integrator)
         # Compute energy error
         delta_H = Hamiltonian(x_new, p_new, potential, mass_matrix) - Hamiltonian(x, p_prop, potential, mass_matrix)
         # Metropolis-Hastings acceptance
-        accept = jax.random.uniform(subkey) < jnp.exp(-delta_H)
+        accept = jax.random.uniform(accept_key) < jnp.exp(-delta_H)
         # If acceptance, add one to acceptances
         x, p = jax.lax.cond(accept, lambda _: (x_new, p_new), lambda _: (x, -p_prop), operand=None)
         if n >= burn_in:
             samples.append(x)
-            acceptances = jax.lax.cond(accept, lambda _: acceptances + 1, lambda _: acceptances, operand=None)
-            # Compute Hessian of potential & frequencies (sqrt of eigenvalues)
+            acceptances += int(accept)
             if potential_hessian is not None:
                 Hessian = potential_hessian(x)
                 freqs_iter = _compute_frequencies(Hessian)
-                frequencies.append(freqs_iter)
-            else: frequencies = jax.numpy.ones(x.shape[0])
-    samples, frequencies = jnp.stack(samples, axis=0), jnp.stack(frequencies, axis=0)
+            else:
+                freqs_iter = jnp.ones(x.shape[0])
+            frequencies.append(freqs_iter)
+    samples = jnp.stack(samples, axis=0)
+    frequencies = jnp.stack(frequencies, axis=0)
+    if return_state:
+        return samples, acceptances, frequencies, x, p, key
     return samples, acceptances, frequencies
 
 def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, sensibility,
@@ -181,34 +247,42 @@ def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, se
     Returns:
     tuned_step_size (float): tuned step size
     """
-    tuned_step_size, N, N_tot = step_size, 0, 0
+    tuned_step_size, N, N_acc_window, N_tot = step_size, 0, 0, 0
+    AR = 0.0
+    x = x_init
+    p = None
     while N_tot + n_samples_check < n_samples_tune:
         if sampler == "HMC":
-            samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_check, burn_in = 0, step_size = tuned_step_size, 
-                                         n_steps = n_steps, potential = potential, potential_grad = potential_grad,
-                                         potential_hessian = potential_hessian, mass_matrix = mass_matrix, integrator = integrator, key = key,
-                                         phase_name = "Tuning")
+            _, N_acc, _, x, _, key = _sAIA_HMC(
+                x, n_samples = n_samples_check, burn_in = 0, step_size = tuned_step_size,
+                n_steps = n_steps, potential = potential, potential_grad = potential_grad,
+                potential_hessian = potential_hessian, mass_matrix = mass_matrix, integrator = integrator,
+                key = key, phase_name = "Tuning", return_state = True
+            )
         elif sampler == "GHMC":
-            samples, N_acc, frequencies = _sAIA_GHMC(x_init, n_samples = n_samples_check, burn_in = 0, step_size = tuned_step_size, 
-                                         n_steps = n_steps, potential = potential, potential_grad = potential_grad,
-                                         potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                                         momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
-                                         integrator = integrator, key = key, phase_name = "Tuning")
+            _, N_acc, _, x, p, key = _sAIA_GHMC_stateful(
+                x, p, n_samples = n_samples_check, burn_in = 0, step_size = tuned_step_size,
+                n_steps = n_steps, potential = potential, potential_grad = potential_grad,
+                potential_hessian = potential_hessian, mass_matrix = mass_matrix,
+                momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
+                integrator = integrator, key = key, phase_name = "Tuning", return_state = True
+            )
         N += n_samples_check
-        AR = acceptance_rate(N_acc, n_samples_check)
+        N_acc_window += N_acc
+        AR = acceptance_rate(N_acc_window, N)
         if AR < target_AR - sensibility:
             tuned_step_size -= delta_step
-            N = 0
+            N, N_acc_window = 0, 0
         elif AR > target_AR + sensibility:
             tuned_step_size += delta_step
-            N = 0
+            N, N_acc_window = 0, 0
         N_tot += n_samples_check
-    return tuned_step_size, AR
+    return tuned_step_size, AR, x, p, key
 
 def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_size, 
                  n_steps, stage, potential, potential_grad, potential_hessian, 
                  mass_matrix, integrator, sampler, momentum_noise_lower,
-                 momentum_noise_upper, key):
+                 momentum_noise_upper, key, p_init = None):
     """
     Burn-In stage for the s-AIA method
     -------------------------
@@ -234,19 +308,21 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
     step_sizes (jax.Array): step sizes
     """
     if sampler == "HMC":
-        samples, N_acc, frequencies = _sAIA_HMC(x_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size,
-                                    n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
-                                    potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                                    integrator = integrator, key = key, phase_name = "Burn-In")
+        samples, N_acc, frequencies, x_final, p_final, key = _sAIA_HMC(
+            x_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size,
+            n_steps = n_steps, potential = potential, potential_grad = potential_grad,
+            potential_hessian = potential_hessian, mass_matrix = mass_matrix,
+            integrator = integrator, key = key, phase_name = "Burn-In", return_state = True
+        )
     elif sampler == "GHMC":
-        samples, N_acc, frequencies = _sAIA_GHMC(x_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size, 
-                                    n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
-                                    potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                                    momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
-                                    integrator = integrator, key = key, phase_name = "Burn-In")
+        samples, N_acc, frequencies, x_final, p_final, key = _sAIA_GHMC_stateful(
+            x_init, p_init, n_samples = n_samples_burn_in, burn_in = 0, step_size = step_size,
+            n_steps = n_steps, potential = potential, potential_grad = potential_grad,
+            potential_hessian = potential_hessian, mass_matrix = mass_matrix,
+            momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
+            integrator = integrator, key = key, phase_name = "Burn-In", return_state = True
+        )
     frequencies = jnp.mean(frequencies, axis = 0)
-    # Handle complex frequencies by taking the absolute value
-    frequencies = jnp.abs(frequencies)
     max_freq = jnp.max(frequencies)
     AR = acceptance_rate(N_acc, n_samples_burn_in)
     dimensionless_step_sizes, step_sizes = None, None
@@ -296,15 +372,16 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
                                                         operand = None)
             elif std_dev_freq > 1:
                 fitting_factor = S_freq
-                t_ColSI = stage/(S_freq * (max_freq - std_dev_freq))
-                t_lower = h_lower/(S_freq * (max_freq - std_dev_freq))
+                smooth_max_freq = jnp.maximum(max_freq - std_dev_freq, 1e-8)
+                t_ColSI = stage/(S_freq * smooth_max_freq)
+                t_lower = h_lower/(S_freq * smooth_max_freq)
                 # stability_limit = 2*stage/(S_freq * (max_freq - std_dev_freq))
                 step_sizes = jax.random.uniform(key, shape = (n_samples_prod, )) * (t_ColSI - t_lower) + t_lower
                 dimensionless_step_sizes = jax.lax.cond(S_freq > 1, 
-                                                        lambda _: (2*(max_freq - std_dev_freq)*step_sizes/step_size)*jnp.power(2*jnp.pi*(1 - AR)**2/(jnp.sum(frequencies**6)), 1/6),
-                                                        lambda _: step_sizes * (max_freq - std_dev_freq), 
+                                                        lambda _: (2*smooth_max_freq*step_sizes/step_size)*jnp.power(2*jnp.pi*(1 - AR)**2/(jnp.sum(frequencies**6)), 1/6),
+                                                        lambda _: step_sizes * smooth_max_freq, 
                                                         operand = None)
-    return dimensionless_step_sizes, step_sizes, fitting_factor
+    return dimensionless_step_sizes, step_sizes, fitting_factor, x_final, p_final, key
 
 @jax.jit
 def _rho_2(step_size, b):
@@ -318,7 +395,7 @@ def _rho_3(step_size, b):
     denominator = 2 * (3 * b - b * step_size**2 * (b - 1/4) - 1) * (1 - 3 * b - b * step_size**2 * (b - 1/2)**2) * (-9 * b**2 + 6 * b - step_size**2 * (b**3 - 5/4 * b**2 + b/2 - 1/16) - 1)
     return numerator / denominator
 
-def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 20):
+def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 256, n_h_samples = 256):
     """
     Compute optimal coefficients for s-AIA method
     -------------------------
@@ -328,31 +405,29 @@ def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 
     key (int): random number generator key
     n_coeff_samples (int): number of coefficient samples
     """
-    rho, b_MEk, b_VVk = None, None, None
     if stage == 2:
         rho = _rho_2
-        b_MEk = ME_2().b
-        b_VVk = VV_2().b
+        b_low, b_high = ME_2().b, VV_2().b
     elif stage == 3:
         rho = _rho_3
-        b_MEk = ME_3().b
-        b_VVk = VV_3().b
+        b_low, b_high = ME_3().b, VV_3().b
     else:
         raise NotImplementedError("Only 2- & 3-stage integrators are supported as of now.")
+
+    del key
+    dimensionless_step_sizes = np.asarray(dimensionless_step_sizes, dtype = float)
     optimal_coeffs = []
-    # Sample b values between b_MEk and b_VVk
-    for i in range(dimensionless_step_sizes.shape[0]):
-        b_values = jax.random.uniform(jax.random.PRNGKey(key), shape = (n_coeff_samples, )) * (b_VVk - b_MEk) + b_MEk
-        step_sizes = jax.random.uniform(jax.random.PRNGKey(key), shape = (n_coeff_samples, )) * dimensionless_step_sizes[i]
-        max_rho = []
-        for b in b_values:
-            rho_vals = jax.vmap(rho, in_axes = (0, None))(step_sizes, b)
-            max_rho.append(jnp.max(rho_vals))
-        max_rho = jnp.array(max_rho)
-        optimal_b = b_values[jnp.argmin(max_rho)]
-        optimal_coeffs.append(optimal_b)
-    optimal_coeffs = jnp.array(optimal_coeffs)
-    return optimal_coeffs
+
+    b_values = jnp.linspace(b_low, b_high, n_coeff_samples)
+    for h_max in dimensionless_step_sizes:
+        h_max = float(np.clip(h_max, 1e-6, 2 * stage - 1e-6))
+        h_values = jnp.linspace(1e-6, h_max, n_h_samples)
+        rho_grid = jax.vmap(lambda b: jax.vmap(lambda h: rho(h, b))(h_values))(b_values)
+        rho_grid = jnp.where(jnp.isfinite(rho_grid) & (rho_grid >= 0), rho_grid, jnp.inf)
+        worst_case = jnp.max(rho_grid, axis = 1)
+        optimal_coeffs.append(float(b_values[jnp.argmin(worst_case)]))
+
+    return jnp.asarray(optimal_coeffs)
 
 def __lambda_phi(stage, a = None, b = None):
     if stage == 2:
@@ -434,6 +509,7 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     potential_grad = jax.jit(jax.grad(potential))
     if compute_hessian == True: potential_hessian = jax.jit(jax.hessian(potential))
     else: potential_hessian = None 
+    key = jax.random.PRNGKey(RNG_key)
     # Step 1: Tuning Stage
     print("1) Tuning Stage...")
     n_samples, step_size, n_steps, integrator = n_samples_tune, 1/x_init.shape[0], 1, VerletIntegrator()
@@ -442,7 +518,7 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
         if stage == 2: # TODO: FIX momentum assignation for 2-stage
             a, b = 0, 1/4
             momentum_noise_lower = optimal_momentum_noise(stage, stage, x_init.shape[0], a, b)
-            momentum_noise_upper = optimal_momentum_noise(2.0772, stage, x_init.shape[0], a, b)
+            momentum_noise_upper = optimal_momentum_noise(1.5, stage, x_init.shape[0], a, b)
         elif stage == 3:
             b_low_phi = 0.11888010966548;
             a_low_phi = (1-2*b_low_phi)/(4*(1-3*b_low_phi));
@@ -457,9 +533,11 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     if sampler == "GHMC":
         print(f"\t- Initial Momentum Noise (Lower Bound): {momentum_noise_lower}")
         print(f"\t- Initial Momentum Noise (Upper Bound): {momentum_noise_upper}")
-    tuned_step_size, AR_tuned = _sAIA_Tuning(x_init, n_samples, n_samples_check, step_size, n_steps, 
-                                   sensibility, target_AR, potential, potential_grad, potential_hessian,
-                                   mass_matrix, delta_step, integrator, sampler, momentum_noise_lower, momentum_noise_upper, jax.random.PRNGKey(RNG_key))
+    tuned_step_size, AR_tuned, x_tuned, p_tuned, key = _sAIA_Tuning(
+        x_init, n_samples, n_samples_check, step_size, n_steps, sensibility, target_AR,
+        potential, potential_grad, potential_hessian, mass_matrix, delta_step, integrator,
+        sampler, momentum_noise_lower, momentum_noise_upper, key
+    )
     print(f"\t- Tuned AR: {AR_tuned}")
     print(f"\t- Tuned Step-Size: {tuned_step_size:.5f}")
     print("="*61)
@@ -467,10 +545,11 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print("2) Burn-In Stage...")
     n_samples, step_size = n_samples_burn_in, tuned_step_size
     print(f"\t- Number of Burn-In Samples: {n_samples}")
-    dimensionless_step_sizes, step_sizes, fitting_factor = _sAIA_BurnIn(x_init, n_samples, n_samples_prod, compute_freqs, step_size, n_steps, 
-                                                        stage, potential, potential_grad, potential_hessian, mass_matrix, 
-                                                        integrator, sampler, momentum_noise_lower, 
-                                                        momentum_noise_upper, jax.random.PRNGKey(RNG_key))
+    dimensionless_step_sizes, step_sizes, fitting_factor, x_burned, p_burned, key = _sAIA_BurnIn(
+        x_tuned, n_samples, n_samples_prod, compute_freqs, step_size, n_steps, stage, potential,
+        potential_grad, potential_hessian, mass_matrix, integrator, sampler, momentum_noise_lower,
+        momentum_noise_upper, key, p_init = p_tuned
+    )
     print(f"\t- Fitting factor: {fitting_factor}")
     print(f"\t- Dimensionless Step-Sizes: {dimensionless_step_sizes}")
     print(f"\t- Step-Sizes: {step_sizes}")
@@ -479,28 +558,30 @@ def sAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print("="*61)
     # Step 3: Production Stage
     print("3) Production Stage...")
-    # n_steps = jax.random.randint(jax.random.PRNGKey(RNG_key), shape=(n_samples_prod,), minval=1, maxval=2 * (x_init.shape[0] / step_sizes) - 1)
-    if fitting_factor <= 1.3 and compute_hessian == True: n_steps = jax.random.randint(jax.random.PRNGKey(RNG_key), shape=(n_samples_prod,), minval=1, maxval=1)
-    elif fitting_factor > 1.3 and compute_hessian == True: n_steps = jax.random.randint(jax.random.PRNGKey(RNG_key), shape=(n_samples_prod,), minval=2, maxval=6)
-    elif compute_hessian == False: n_steps = jax.random.randint(jax.random.PRNGKey(RNG_key), shape=(n_samples_prod,), minval=1, maxval=1)
+    n_steps = jnp.clip(jnp.rint(1.0 / step_sizes), a_min = 1, a_max = 100).astype(int)
     print(f"\t- Number of Steps: {n_steps}")
     if stage == 2:
-        integrator = [MSSI_2(b) for b in opt_integration_coeffs]
+        integrator = [(2, float(b)) for b in opt_integration_coeffs]
     elif stage == 3:
         a_coeffs = [(2*b - 1)/(2*(6*b-2)) for b in opt_integration_coeffs]
-        integrator = [MSSI_3(a, b) for a, b in zip(a_coeffs, opt_integration_coeffs)]
+        integrator = [(3, float(a), float(b)) for a, b in zip(a_coeffs, opt_integration_coeffs)]
     assert len(integrator) == n_samples_prod, "Number of integrators must be equal to number of samples"
     if sampler == "HMC":
-        samples, AR_prod, _ = _sAIA_HMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
-                                n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
-                                potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                                integrator = integrator, key = jax.random.PRNGKey(RNG_key), phase_name = "Production")
+        samples, N_acc_prod, _, _, _, key = _sAIA_HMC(
+            x_burned, n_samples = n_samples_prod, burn_in = 0, step_size = step_sizes,
+            n_steps = n_steps, potential = potential, potential_grad = potential_grad,
+            potential_hessian = potential_hessian, mass_matrix = mass_matrix,
+            integrator = integrator, key = key, phase_name = "Production", return_state = True
+        )
     elif sampler == "GHMC":
-        samples, AR_prod, _ = _sAIA_GHMC(x_init, n_samples = n_samples_prod, burn_in = 100, step_size = step_sizes, 
-                                n_steps = n_steps, potential = potential, potential_grad = potential_grad, 
-                                potential_hessian = potential_hessian, mass_matrix = mass_matrix, 
-                                momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
-                                integrator = integrator, key = jax.random.PRNGKey(RNG_key), phase_name = "Production")
+        samples, N_acc_prod, _, _, _, key = _sAIA_GHMC_stateful(
+            x_burned, p_burned, n_samples = n_samples_prod, burn_in = 0, step_size = step_sizes,
+            n_steps = n_steps, potential = potential, potential_grad = potential_grad,
+            potential_hessian = potential_hessian, mass_matrix = mass_matrix,
+            momentum_noise_lower = momentum_noise_lower, momentum_noise_upper = momentum_noise_upper,
+            integrator = integrator, key = key, phase_name = "Production", return_state = True
+        )
+    AR_prod = acceptance_rate(N_acc_prod, n_samples_prod)
     print("="*61)
     print(f"Production stage finished, production acceptance rate: {AR_prod}.")
     return samples
@@ -643,12 +724,12 @@ def sMAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print(f"\t- Initial Step-Size: {initial_step_size}")
     
     momentum_noise_lower = optimal_momentum_noise(stage, stage, x_init.shape[0], a_tune, b_tune)
-    momentum_noise_upper = optimal_momentum_noise(2.0772, stage, x_init.shape[0], a_tune, b_tune)
+    momentum_noise_upper = optimal_momentum_noise(1.5 if stage == 2 else 2.0772, stage, x_init.shape[0], a_tune, b_tune)
     
     print(f"\t- Initial Momentum Noise (Lower Bound): {momentum_noise_lower}")
     print(f"\t- Initial Momentum Noise (Upper Bound): {momentum_noise_upper}")
     # Tune the step size using the adaptive tuning function
-    tuned_step_size, AR_tuned = _sAIA_Tuning(
+    tuned_step_size, AR_tuned, x_tuned, p_tuned, key = _sAIA_Tuning(
         x_init, n_samples_tune, n_samples_check, initial_step_size, n_steps, sensibility,
         target_AR, potential, potential_grad, potential_hessian, mass_matrix,
         delta_step, VerletIntegrator(), "GHMC", momentum_noise_lower,
@@ -659,13 +740,12 @@ def sMAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     # === 2. Burn-In Stage ===
     print("2) Burn-In Stage...")
     # Run MHMC to estimate frequencies with the tuned step size
-    key, subkey = jax.random.split(key)
     burn_in_integrator = VerletIntegrator()
     # Use frequency information to compute adaptive parameters for the production run
-    dimensionless_step_sizes, step_sizes, _ = _sAIA_BurnIn(
-         x_init, n_samples_burn_in, n_samples_prod, compute_freqs, tuned_step_size, n_steps,
+    dimensionless_step_sizes, step_sizes, _, x_burned, p_burned, key = _sAIA_BurnIn(
+         x_tuned, n_samples_burn_in, n_samples_prod, compute_freqs, tuned_step_size, n_steps,
          stage, potential, potential_grad, potential_hessian, mass_matrix,
-         burn_in_integrator, "GHMC", momentum_noise_lower, momentum_noise_upper, key)
+         burn_in_integrator, "GHMC", momentum_noise_lower, momentum_noise_upper, key, p_init = p_tuned)
     
     opt_integration_coeffs = _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, RNG_key)
     print("\t- Dimensionless Step-Sizes computed.")
@@ -690,7 +770,7 @@ def sMAIA(x_init, potential_args, n_samples_tune, n_samples_check,
 
     # Run the final production sampling with all adaptive parameters
     samples, weights, _, _ = _sMAIA_MHMC(
-        x_init, n_samples_prod, 100, step_sizes, prod_steps,
+        x_burned, n_samples_prod, 100, step_sizes, prod_steps,
         potential, potential_grad, potential_hessian, mass_matrix,
         momentum_noise_prod, prod_integrators, order, key, "Production")
     

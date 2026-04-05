@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs, sMAIA
-from pyHaiCS.integrators.integrators import ME_3, VV_3
+from pyHaiCS.integrators.integrators import ME_2, VV_2, ME_3, VV_3
 from pyHaiCS.utils.test import HiddenPrints
 
 class TestSAIA(unittest.TestCase):
@@ -139,6 +139,12 @@ class TestSAIA(unittest.TestCase):
         # Check bounds
         b_min, b_max = ME_3().b, VV_3().b
         self.assertTrue(jnp.all((coeffs >= b_min) & (coeffs <= b_max)))
+
+    @HiddenPrints
+    def test_optimal_coeffs_track_stability_interval(self):
+        coeffs = _sAIA_OptimalCoeffs(jnp.array([0.05, 3.95]), stage=2, key=0)
+        self.assertLess(abs(float(coeffs[0] - ME_2().b)), 0.01)
+        self.assertLess(abs(float(coeffs[1] - VV_2().b)), 0.01)
 
     @HiddenPrints
     def test_reproducibility(self):
