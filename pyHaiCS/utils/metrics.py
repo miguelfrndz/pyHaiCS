@@ -379,18 +379,18 @@ def codaESS(samples, axis = 0, method = "ar", normed = False, options = None, no
     for chain in range(n_chains):
         if method == "ar":
             max_ar_order = options.get("max_ar_order", None)
-            ess_chain = ar_process_fit(samples[chain], axis, normed, max_ar_order = max_ar_order)
+            ess_chain = ar_process_fit(samples[chain], axis, normed = False, max_ar_order = max_ar_order)
         elif method == "monotone-sequence":
-            ess_chain, _ = monotone_sequence(samples[chain], axis, normed)
+            ess_chain, _ = monotone_sequence(samples[chain], axis, normed = False)
         elif method == "batch-means":
             n_batch = options.get("n_batch", 25)
-            ess_chain = batch_means(samples[chain], axis, normed, n_batch = n_batch)
+            ess_chain = batch_means(samples[chain], axis, normed = False, n_batch = n_batch)
         else:
             raise NotImplementedError(f"Method {method} is not supported.")
         ess_values[chain] = np.asarray(ess_chain, dtype = float)
 
-    ess_values = _combine_with_weight_ess(ess_values, weights, normalize = normalize)
-    if weights is None and normalize:
+    ess_values = _combine_with_weight_ess(ess_values, weights, normalize = False)
+    if normalize or normed:
         ess_values = ess_values / n_samples
     return jnp.asarray(ess_values)
 

@@ -2,7 +2,7 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs, sMAIA
+from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs, _compute_frequencies, sMAIA
 from pyHaiCS.integrators.integrators import ME_2, VV_2, ME_3, VV_3
 from pyHaiCS.utils.test import HiddenPrints
 
@@ -129,6 +129,13 @@ class TestSAIA(unittest.TestCase):
         step_size_nd = 1.5
         noise = optimal_momentum_noise(step_size_nd, stage=2, D=dim, a=0.0, b=1/4)
         self.assertTrue(0 <= noise <= 1)
+
+    @HiddenPrints
+    def test_compute_frequencies_respects_mass_matrix(self):
+        hessian = jnp.diag(jnp.array([4.0, 9.0]))
+        mass_matrix = jnp.diag(jnp.array([1.0, 4.0]))
+        freqs = jnp.sort(_compute_frequencies(hessian, mass_matrix))
+        self.assertTrue(jnp.allclose(freqs, jnp.array([1.5, 2.0]), atol=1e-6))
 
     @HiddenPrints
     def test_optimal_coeffs_output_shape(self):

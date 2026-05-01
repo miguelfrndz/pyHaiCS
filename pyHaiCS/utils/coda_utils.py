@@ -273,7 +273,8 @@ def monotone_sequence(
     n_sample = samples.shape[axis]
     ess = np.zeros(n_param)
     if n_sample <= 2: # Edge case.
-        return ess
+        ess.fill(n_sample)
+        return ess, []
 
     auto_cor = []
     for j in range(n_param):
@@ -281,7 +282,13 @@ def monotone_sequence(
             x = samples[:, j]
         else:
             x = samples[j, :]
-        x_std = (x - np.mean(x)) / np.std(x)
+        std = np.std(x)
+        if std <= 0 or not np.isfinite(std):
+            ess[j] = 1.0
+            if require_acorr:
+                auto_cor.append(np.array([1.]))
+            continue
+        x_std = (x - np.mean(x)) / std
         ess_j, auto_cor_j = _monotone_sequence_1d(x_std, require_acorr)
         ess[j] = ess_j
         if require_acorr:

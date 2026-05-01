@@ -1,4 +1,4 @@
-import sys, unittest
+import sys, unittest, warnings
 from pathlib import Path
 
 import jax
@@ -72,6 +72,23 @@ class TestEffectiveSampleSizes(unittest.TestCase):
         ess = codaESS(self.aligned_samples, method='monotone-sequence')
         self.assertTrue(jnp.all(ess > 0), "codaESS contains non-positive values.")
         self.assertEqual(ess.shape[-1], self.aligned_samples.shape[-1])
+
+    def test_coda_normed_is_normalize_alias(self):
+        normalized = codaESS(self.aligned_samples, method='monotone-sequence', normalize=True)
+        normed_and_normalized = codaESS(self.aligned_samples, method='monotone-sequence', normed=True, normalize=True)
+        legacy_normed = codaESS(self.aligned_samples, method='monotone-sequence', normed=True, normalize=False)
+
+        self.assertTrue(jnp.allclose(normalized, normed_and_normalized))
+        self.assertTrue(jnp.allclose(normalized, legacy_normed))
+
+    def test_coda_monotone_tiny_chain_output_valid(self):
+        tiny_samples = jnp.arange(2.0).reshape(1, 2, 1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ess = codaESS(tiny_samples, method='monotone-sequence', normalize=False)
+
+        self.assertTrue(jnp.all(ess > 0), "Tiny-chain CODA ESS contains non-positive values.")
+        self.assertEqual(ess.shape, (1, 1))
 
     def test_weighted_ess_is_capped_by_importance_weights(self):
         weights = jnp.linspace(1.0, 0.1, self.aligned_samples.shape[1])
