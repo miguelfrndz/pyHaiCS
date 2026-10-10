@@ -1,9 +1,9 @@
 import warnings
 import jax
-import numpy as np
 import jax.numpy as jnp
 from tqdm import tqdm
 from functools import partial
+from jax.scipy.linalg import solve_triangular
 from .hamiltonian import _run_chain, make_hmc_step, make_ghmc_step, make_mhmc_step
 from ..utils.hamiltonian import Position_Terms, as_mass
 from ..integrators.integrators import VerletIntegrator, VV_2, ME_2, VV_3, ME_3, MSSI_2, MSSI_3, Integrator, get_mhmc_coeffs, _rho_2, _rho_3, _optimal_b, sAIA_2, sAIA_3
@@ -16,11 +16,15 @@ def _compute_frequencies(Hessian, mass_matrix = None):
     -------------------------
     Parameters:
         Hessian (jax.Array): Hessian matrix
-        mass_matrix (jax.Array): mass matrix
+        mass_matrix (jax.Array or MassMatrix or None): mass matrix, None stands for the identity
     -------------------------
     Returns:
         freqs (jax.Array): frequencies
     """
+    if mass_matrix is not None:
+        # Eigenvalues of M^-1 H, from the symmetric matrix L^-1 H L^-T (with M = L L^T)
+        chol = as_mass(mass_matrix).chol
+        Hessian = solve_triangular(chol, solve_triangular(chol, Hessian, lower=True).T, lower=True)
     return jnp.sqrt(jnp.abs(jnp.linalg.eigvalsh(Hessian)))
 
 def _pad_front(tree, n):
@@ -105,7 +109,7 @@ def _sAIA_run(x_init, n_samples, burn_in, per_iter, step_fn, sampler,
         frequencies = jnp.ones((1, x_init.shape[0]))     
     else:
         frequencies = jax.lax.map(
-            lambda x: _compute_frequencies(potential_hessian(x)), samples[::freq_thin])
+            lambda x: _compute_frequencies(potential_hessian(x), mass_matrix), samples[::freq_thin])
     return samples, accepted.sum(), frequencies, state_f
 
 def _sAIA_Tuning(x_init, n_samples_tune, n_samples_check, step_size, n_steps, sensibility,
@@ -247,7 +251,7 @@ def _sAIA_BurnIn(x_init, n_samples_burn_in, n_samples_prod, compute_freqs, step_
     dimensionless_step_sizes = c * step_sizes
     return dimensionless_step_sizes, step_sizes, fitting_factor, c, state
 
-def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 256, n_h_samples = 256):
+def _sAIA_OptimalCoeffs(dimensionless_step_sizes, stage, key, n_coeff_samples = 20):
     """
     Compute optimal coefficients for s-AIA method
     -------------------------
@@ -612,7 +616,7 @@ def sMAIA(x_init, potential_args, n_samples_tune, n_samples_check,
     print(f"\t- Initial Step-Size: {step_size}")
     
     momentum_noise_lower = optimal_momentum_noise(stage, stage, x_init.shape[0], a_tune, b_tune)
-    momentum_noise_upper = optimal_momentum_noise(1.5 if stage == 2 else 2.0772, stage, x_init.shape[0], a_tune, b_tune)
+    momentum_noise_upper = optimal_momentum_noise(2.0772, stage, x_init.shape[0], a_tune, b_tune)
     
     print(f"\t- Initial Momentum Noise (Lower Bound): {momentum_noise_lower}")
     print(f"\t- Initial Momentum Noise (Upper Bound): {momentum_noise_upper}")

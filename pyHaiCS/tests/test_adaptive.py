@@ -2,8 +2,8 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from pyHaiCS.samplers.adaptive import ATune, optimal_momentum_noise, _sAIA_OptimalCoeffs, sMAIA
-from pyHaiCS.integrators.integrators import ME_3, VV_3
+from pyHaiCS.samplers.adaptive import ATune, optimal_momentum_noise, _sAIA_OptimalCoeffs, _compute_frequencies, sMAIA
+from pyHaiCS.integrators.integrators import ME_2, VV_2, ME_3, VV_3
 from pyHaiCS.utils.test import HiddenPrints
 
 class TestSAIA(unittest.TestCase):

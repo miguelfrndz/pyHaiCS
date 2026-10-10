@@ -274,6 +274,7 @@ def monotone_sequence(
     n_sample = samples.shape[axis]
     ess = np.zeros(n_param)
     if n_sample <= 2: # Edge case.
+        ess.fill(n_sample)
         return ess, []
 
     auto_cor = []

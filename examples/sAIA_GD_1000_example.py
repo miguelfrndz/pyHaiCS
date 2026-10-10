@@ -55,7 +55,7 @@ def run_independent_chains(args, precision_matrix, mass_matrix):
             target_AR = args.target_ar,
             stage = args.stage,
             sensibility = args.sensibility,
-            delta_step = args.delta_step,
+            step_factor = args.step_factor,
             compute_freqs = args.compute_hessian,
             compute_hessian = args.compute_hessian,
             sampler = args.sampler,
@@ -127,7 +127,7 @@ def parse_args():
     parser.add_argument("--n-samples-prod", type = int, default = 2500)
     parser.add_argument("--target-ar", type = float, default = 0.92)
     parser.add_argument("--sensibility", type = float, default = 0.01)
-    parser.add_argument("--delta-step", type = float, default = 0.001)
+    parser.add_argument("--step-factor", type = float, default = 0.5)
     parser.add_argument("--seed", type = int, default = 42)
     parser.add_argument("--diagnostic-dims", type = int, default = parser.get_default("dim"), help = "Number of leading dimensions to include in diagnostics.")
     parser.add_argument(
