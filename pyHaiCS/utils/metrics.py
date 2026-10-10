@@ -27,48 +27,50 @@ def PSRF(samples):
     and the average of the estimated posterior variance within each chain.
     """
     n_chains, n_samples, dims = samples.shape
-    within_chain_variance = jnp.mean(jnp.var(samples, axis = 1), axis = 0)
-    global_param_means = jnp.mean(jnp.mean(samples, axis = 1), axis = 0)
-    between_chain_variance = n_samples/(n_chains - 1) * jnp.sum((jnp.mean(samples, axis = 1) - global_param_means) ** 2, axis = 0)
-    sample_variance_estimate = (1 - 1/n_samples) * within_chain_variance + between_chain_variance/n_samples
-    variance_estimate = sample_variance_estimate + between_chain_variance/(n_samples * n_chains)
-    degs_of_freedom = 2 * variance_estimate ** 2 / jnp.var(variance_estimate)
-    return jnp.sqrt((degs_of_freedom + 3) / (degs_of_freedom + 1) * variance_estimate / within_chain_variance)
+    if n_chains < 2:
+        raise ValueError("PSRF requires at least 2 chains.")
+    chain_means = jnp.mean(samples, axis = 1)
+    within_chain_variance = jnp.mean(jnp.var(samples, axis = 1, ddof = 1), axis = 0)
+    between_chain_variance = n_samples * jnp.var(chain_means, axis = 0, ddof = 1)
+    variance_estimate = (n_samples - 1) / n_samples * within_chain_variance + between_chain_variance / n_samples
+    return jnp.sqrt(variance_estimate / within_chain_variance)
 
 def _geyerESS_atomic(samples, thres_estimator, normalize):
     if thres_estimator not in ['ISPE', 'IMSE', 'var_trunc', 'lag_trunc', 'sign_trunc']:
         raise ValueError(f"Unknown threshold estimator: {thres_estimator}")
     n_samples = samples.shape[0]
+    var = autocovariance(samples, 0)
     if thres_estimator in ['ISPE', 'IMSE']:
-        pairwise_autocovs = []
-        sum_pairwise_autocovs = 0
-        for k in range(n_samples):
-            pairwise_autocov = autocovariance(samples, 2*k) + autocovariance(samples, 2*k + 1)
-            if pairwise_autocov < 0:
+        pairwise_autocorrs = []
+        sum_pairwise_autocorrs = 0
+        for k in range(n_samples//2):
+            pairwise_autocorr = (autocovariance(samples, 2*k) + autocovariance(samples, 2*k + 1)) / var
+            if pairwise_autocorr < 0:
                 break
             if thres_estimator == 'IMSE':
                 # Pairwise autocovariance is kept monotonically decreasing
-                if k > 0 and pairwise_autocov > pairwise_autocovs[-1]:
-                    pairwise_autocov = pairwise_autocovs[-1]
-            sum_pairwise_autocovs += pairwise_autocov
-            pairwise_autocovs.append(pairwise_autocov)
-        ESS = n_samples / (-1 + 2 * sum_pairwise_autocovs)
+                if k > 0 and pairwise_autocorr > pairwise_autocorrs[-1]:
+                    pairwise_autocorr = pairwise_autocorrs[-1]
+            sum_pairwise_autocorrs += pairwise_autocorr
+            pairwise_autocorrs.append(pairwise_autocorr)
+        ESS = n_samples / (-1 + 2 * sum_pairwise_autocorrs)
     elif thres_estimator in ['lag_trunc', 'sign_trunc']:
-        sum_autocovs = 0
-        for k in range(1, 2*n_samples + 1):
-            autocov = autocovariance(samples, k)
-            if thres_estimator == 'lag_trunc' and autocov < 0.05:
+        sum_autocorrs = 0
+        for k in range(1, n_samples):
+            autocorr = autocovariance(samples, k) / var
+            if thres_estimator == 'lag_trunc' and autocorr < 0.05:
                 break
-            elif thres_estimator == 'sign_trunc' and autocov < 0:
+            elif thres_estimator == 'sign_trunc' and autocorr < 0:
                 break
-            sum_autocovs += autocov
-        ESS = n_samples / (1 + 2 * sum_autocovs)
+            sum_autocorrs += autocorr
+        ESS = n_samples / (1 + 2 * sum_autocorrs)
     elif thres_estimator == 'var_trunc':
-        sum_autocovs = 0
-        for k in range(n_samples):
-            autocov = autocovariance(samples, k)
-            sum_autocovs += autocov * (n_samples - k) / n_samples
-        ESS = n_samples / (1 + 2 * sum_autocovs)
+        max_lag = int(np.sqrt(n_samples))
+        sum_autocorrs = 0
+        for k in range(1, max_lag):
+            autocorr = autocovariance(samples, k) / var
+            sum_autocorrs += autocorr * (n_samples - k) / n_samples * (1 - k / max_lag)
+        ESS = n_samples / (1 + 2 * sum_autocorrs)
     if normalize:
         return ESS / n_samples
     return ESS
@@ -105,7 +107,7 @@ def multiESS(samples, batch_size = 'sqroot', Noffsets = 10, Nb = None, normalize
 
     'sqroot'    b=floor(n^(1/2)) (for chains with slow mixing time; default)
     'cuberoot'  b=floor(n^(1/3)) (for chains with fast mixing time)
-    'lESS'      pick the b that produces the lowest effective sample size
+    'less'      pick the b that produces the lowest effective sample size
                 for a number of b ranging from n^(1/4) to n/max(20,p); this
                 is a conservative choice
 
@@ -142,55 +144,49 @@ def multiESS(samples, batch_size = 'sqroot', Noffsets = 10, Nb = None, normalize
         if normalize:
             mESS /= n_samples
         ess_values.append(mESS)
-    return jnp.array(ess_values).reshape(n_chains, dims)
+    return jnp.array(ess_values)
 
 def _multiESS_chain(Xi, n, p, b, Noffsets, Nb):
     """
     Compute multiESS for a MCMC chain.
     """
+    Xi = np.asarray(Xi, dtype = np.float64)
     if b == 'sqroot':
-        b = [int(jnp.floor(n ** (1. / 2)))]
+        b = [int(np.floor(n ** (1. / 2)))]
     elif b == 'cuberoot':
-        b = [int(jnp.floor(n ** (1. / 3)))]
+        b = [int(np.floor(n ** (1. / 3)))]
     elif b == 'less':
-        b_min = jnp.floor(n ** (1. / 4))
-        b_max = max(jnp.floor(n / max(p, 20)), jnp.floor(jnp.sqrt(n)))
+        b_min = np.floor(n ** (1. / 4))
+        b_max = max(np.floor(n / max(p, 20)), np.floor(np.sqrt(n)))
         if Nb is None:
             Nb = 200
-        b = jnp.unique(jnp.round(jnp.exp(jnp.linspace(jnp.log(b_min), jnp.log(b_max), Nb)))).astype(int)
+        b = np.unique(np.round(np.exp(np.linspace(np.log(b_min), np.log(b_max), Nb)))).astype(int)
+    else:
+        b = [int(b)]
 
-    theta = jnp.mean(Xi, axis=0)
-    detLambda = jnp.var(Xi.T) if p == 1 else jnp.linalg.det(jnp.cov(Xi.T))
+    theta = np.mean(Xi, axis = 0)
+    _, logdetLambda = np.linalg.slogdet(np.atleast_2d(np.cov(Xi.T)))
 
-    mESS_values = jnp.array([_multiESS_batch(Xi, n, p, theta, detLambda, bi, Noffsets) for bi in b])
-    return jnp.min(mESS_values)
+    return min(_multiESS_batch(Xi, n, p, theta, logdetLambda, bi, Noffsets) for bi in b)
 
-def _multiESS_batch(Xi, n, p, theta, detLambda, b, Noffsets):
+def _multiESS_batch(Xi, n, p, theta, logdetLambda, b, Noffsets):
     """
     Compute multiESS for a given batch size B.
     """
-    # Compute batch estimator for SIGMA
-    a = int(jnp.floor(n / b))
-    Sigma = jnp.zeros((p, p))
-
+    a = int(np.floor(n / b))
     max_offset = n - a * b
-    offsets = jnp.unique(jnp.round(jnp.linspace(0, max_offset, Noffsets)).astype(int))
+    offsets = np.unique(np.round(np.linspace(0, max_offset, Noffsets)).astype(int))
 
-    def offset_sigma(j):
-        indices = j + jnp.arange(a * b)
-        Y = Xi[indices, :].reshape((a, b, p))
-        Ybar = jnp.mean(Y, axis=1)
-        Z = Ybar - theta
-        Sigma_local = jnp.einsum('ij,ik->jk', Z, Z)
-        return Sigma_local
+    Sigma_total = np.zeros((p, p))
+    for j in offsets:
+        Z = Xi[j:j + a * b].reshape(a, b, p).mean(axis = 1) - theta
+        Sigma_total += Z.T @ Z
+    Sigma = Sigma_total * b / (a - 1) / len(offsets)
 
-    Sigma_total = jnp.sum(jnp.stack([offset_sigma(j) for j in offsets]), axis=0)
-    Sigma = (Sigma_total * b) / (a - 1) / len(offsets)
+    _, logdetSigma = np.linalg.slogdet(Sigma)
+    return n * np.exp((logdetLambda - logdetSigma) / p)
 
-    mESS = n * (detLambda / jnp.linalg.det(Sigma)) ** (1. / p)
-    return mESS
-
-def codaESS(samples, axis = 0, method = 'ar', normed = False, options = {}, normalize = True):
+def codaESS(samples, axis = 0, method = 'ar', options = {}, normalize = True):
     """
     Wrapper for calling a function specified by the `method` argument.
     Estimates effective sample sizes (ESS) of samples along the specified axis.
@@ -200,8 +196,6 @@ def codaESS(samples, axis = 0, method = 'ar', normed = False, options = {}, norm
     samples : numpy 1d or 2d array
     axis : int, optional
     method : str, {'ar', 'monotone-sequence', 'batch-means'}
-    normed : bool
-        If True, the efficiency (ESS per MCMC sample) is returned.
     options : dict with keys in ['max_ar_order', 'n_batch']
     normalize : bool
 
@@ -221,14 +215,14 @@ def codaESS(samples, axis = 0, method = 'ar', normed = False, options = {}, norm
     for chain in range(n_chains):
         if method == 'ar':
             max_ar_order = options.get('max_ar_order', None)
-            ess = ar_process_fit(samples[chain], axis, normed, max_ar_order=max_ar_order)
+            ess = ar_process_fit(samples[chain], axis, False, max_ar_order=max_ar_order)
 
         elif method == 'monotone-sequence':
-            ess, _ = monotone_sequence(samples[chain], axis, normed)
+            ess, _ = monotone_sequence(samples[chain], axis, False)
 
         elif method == 'batch-means':
             n_batch = options.get('n_batch', 25)
-            ess = batch_means(samples[chain], axis, normed, n_batch=n_batch)
+            ess = batch_means(samples[chain], axis, False, n_batch=n_batch)
         else:
             raise NotImplementedError("Method {:s} is not supported.".format(method))
         if normalize:
@@ -256,10 +250,18 @@ def GRADe(step_grid, ess_values, normalized_ESS = True):
     # TODO: Implement this as the ratio of the number of grad. computations and the ESS
     pass
 
-def compute_metrics(samples, thres_estimator = 'IMSE', normalize_ESS = True):
+def _print_metrics_table(metrics):
+    print("Sampling Results:")
+    print(f"{' ':<10} {'PSRF':<10} {'ESS':<10} {'MCSE':<10} {'IACT':<10}")
+    for label, fn in [('Min', jnp.min), ('Avg', jnp.mean), ('Max', jnp.max)]:
+        row = [fn(metrics[k]) for k in ('PSRF', 'ESS', 'MCSE', 'IACT')]
+        print(f"{label:<10} " + " ".join(f"{v:<10.2f}" for v in row))
+    print()
+
+def compute_metrics(samples, thres_estimator = 'IMSE', normalize_ESS = True, verbose = True):
     """
     Compute the PSRF, ESS, MCSE, and IACT values for a given set of samples.
-    Prints the results in a tabular format (min/avg/max values).
+    Prints the results in a tabular format (min/avg/max values) if verbose is True.
 
     Parameters:
     -----------
@@ -268,30 +270,26 @@ def compute_metrics(samples, thres_estimator = 'IMSE', normalize_ESS = True):
     thres_estimator: str
         The threshold estimator to use for the ESS calculation. Default: 'IMSE'
     normalize_ESS: bool
-        Whether to normalize the ESS values. Default: True
+        Whether to report the ESS divided by the total number of samples. Default: True
+    verbose: bool
+        Whether to print the summary table. Default: True
+
+    Returns:
+    --------
+    dict with keys 'PSRF', 'ESS', 'MCSE', 'IACT', each an array of shape (n_dims,)
     """
-    # Compute the PSRF, ESS, MCSE, and IACT values
     psrf_values = PSRF(samples)
-    # Average across chains + Reshape to consider as one chain
-    samples = jnp.mean(samples, axis = 0)
-    samples = jnp.reshape(samples, (1, samples.shape[0], samples.shape[1]))
-    ess_values = geyerESS(samples, thres_estimator, normalize = normalize_ESS)
-    mcse_values = MCSE(samples, ess_values)
-    iact_values = IACT(samples, ess_values, normalized_ESS = normalize_ESS)
-    # print(f"Potential Scale Reduction Factor (PSRF): {psrf_values}\n")
-    # print(f"Effective Sample Size (ESS-Geyer-IMSE): {ess_values}\n")
-    # print(f"Monte Carlo Standard Error (MCSE): {mcse_values}\n")
-    # print(f"Integrated Autocorrelation Time (IACT): {iact_values}\n")
+    n_chains, n_samples, n_dims = samples.shape
+    # Absolute ESS per chain, summed over chains (assumes the chains have converged)
+    ess_chains = geyerESS(samples, thres_estimator, normalize = False)
+    ess_total = jnp.sum(ess_chains, axis = 0, keepdims = True)
+    # Pool all chains into one long sample for std and IACT
+    pooled = jnp.reshape(samples, (1, n_chains * n_samples, n_dims))
+    mcse_values = MCSE(pooled, ess_total)[0]
+    iact_values = IACT(pooled, ess_total, normalized_ESS = False)[0]
+    ess_values = ess_total[0] / (n_chains * n_samples) if normalize_ESS else ess_total[0]
 
-    # Compute the min/avg/max of the ess/mcse/iact values
-    minPSRF, avgPSRF, maxPSRF = jnp.min(psrf_values), jnp.mean(psrf_values), jnp.max(psrf_values)
-    minESS, avgESS, maxESS = jnp.min(ess_values), jnp.mean(ess_values), jnp.max(ess_values)
-    minMCSE, avgMCSE, maxMCSE = jnp.min(mcse_values), jnp.mean(mcse_values), jnp.max(mcse_values)
-    minIACT, avgIACT, maxIACT = jnp.min(iact_values), jnp.mean(iact_values), jnp.max(iact_values)
-
-    # Print results table
-    print("Sampling Results:")
-    print(f"{' ':<10} {'PSRF':<10} {'ESS':<10} {'MCSE':<10} {'IACT':<10}")
-    print(f"{'Min':<10} {minPSRF:<10.2f} {minESS:<10.2f} {minMCSE:<10.2f} {minIACT:<10.2f}")
-    print(f"{'Avg':<10} {avgPSRF:<10.2f} {avgESS:<10.2f} {avgMCSE:<10.2f} {avgIACT:<10.2f}")
-    print(f"{'Max':<10} {maxPSRF:<10.2f} {maxESS:<10.2f} {maxMCSE:<10.2f} {maxIACT:<10.2f}\n")
+    metrics = {'PSRF': psrf_values, 'ESS': ess_values, 'MCSE': mcse_values, 'IACT': iact_values}
+    if verbose:
+        _print_metrics_table(metrics)
+    return metrics

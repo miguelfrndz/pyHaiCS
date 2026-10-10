@@ -189,6 +189,16 @@ class TestHMC(unittest.TestCase):
         grad_manual = self.potential_grad(x)
         self.assertTrue(jnp.allclose(grad_auto, grad_manual))
 
+    @HiddenPrints
+    def test_HMC_gaussian_stats(self):
+        """HMC on a standard Gaussian: shape, mean and variance of the samples."""
+        samples = haics.samplers.hamiltonian.HMC(
+            x_init=jnp.zeros(3), potential_args=(), n_samples=2000, burn_in=200,
+            step_size=0.5, n_steps=5, potential=lambda x: 0.5 * jnp.sum(x**2),
+            mass_matrix=jnp.eye(3), integrator=haics.integrators.VV_2(), n_chains=4)
+        self.assertEqual(samples.shape, (4, 2000, 3))
+        self.assertAlmostEqual(float(samples.mean()), 0.0, delta=0.1)
+        self.assertAlmostEqual(float(samples.var()), 1.0, delta=0.1)  
 class TestGHMC(unittest.TestCase):
     @staticmethod
     def quadratic_potential(x):
@@ -223,6 +233,18 @@ class TestGHMC(unittest.TestCase):
             RNG_key=0
         )
         self.assertEqual(samples.shape, (3, self.n_samples, 1))
+
+    @HiddenPrints
+    def test_GHMC_gaussian_stats(self):
+        """GHMC on a standard Gaussian: shape, mean and variance of the samples."""
+        samples = haics.samplers.hamiltonian.GHMC(
+            x_init=jnp.zeros(3), potential_args=(), n_samples=2000, burn_in=200,
+            step_size=0.5, n_steps=5, potential=lambda x: 0.5 * jnp.sum(x**2),
+            mass_matrix=jnp.eye(3), integrator=haics.integrators.VV_2(), n_chains=4, momentum_noise=0.3)
+        self.assertEqual(samples.shape, (4, 2000, 3))
+        self.assertAlmostEqual(float(samples.mean()), 0.0, delta=0.1)
+        self.assertAlmostEqual(float(samples.var()), 1.0, delta=0.1)
+    
 
 class TestMALA(unittest.TestCase):
     @staticmethod
