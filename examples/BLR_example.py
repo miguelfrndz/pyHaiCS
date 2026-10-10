@@ -129,7 +129,7 @@ params_samples = haics.samplers.adaptive.sAIA(params,
                             potential = neg_log_posterior_fn,
                             mass_matrix = jnp.eye(X_train.shape[1]),
                             target_AR = 0.92, stage = 2, 
-                            sensibility = 0.01, delta_step = 0.01, 
+                            sensibility = 0.01, step_factor = 0.5, 
                             compute_freqs = True, sampler = "HMC", RNG_key = 42)
 
 # Make predictions using the samples
@@ -153,7 +153,7 @@ params_samples = haics.samplers.adaptive.sAIA(params,
                             potential = neg_log_posterior_fn,
                             mass_matrix = jnp.eye(X_train.shape[1]),
                             target_AR = 0.92, stage = 2, 
-                            sensibility = 0.01, delta_step = 0.01, 
+                            sensibility = 0.01, step_factor = 0.5, 
                             compute_freqs = True, sampler = "GHMC", RNG_key = 42)
 
 # Make predictions using the samples

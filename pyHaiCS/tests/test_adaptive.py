@@ -2,8 +2,8 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from pyHaiCS.samplers.adaptive import sAIA, optimal_momentum_noise, _sAIA_OptimalCoeffs, _compute_frequencies, sMAIA
-from pyHaiCS.integrators.integrators import ME_2, VV_2, ME_3, VV_3
+from pyHaiCS.samplers.adaptive import ATune, optimal_momentum_noise, _sAIA_OptimalCoeffs, sMAIA
+from pyHaiCS.integrators.integrators import ME_3, VV_3
 from pyHaiCS.utils.test import HiddenPrints
 
 class TestSAIA(unittest.TestCase):
@@ -23,7 +23,7 @@ class TestSAIA(unittest.TestCase):
 
     @HiddenPrints
     def test_sAIA_HMC_output_shape(self):
-        samples = sAIA(
+        samples = ATune(
             x_init=self.x_init,
             potential_args=self.potential_args,
             n_samples_tune=self.n_samples_tune,
@@ -40,7 +40,7 @@ class TestSAIA(unittest.TestCase):
 
     @HiddenPrints
     def test_sAIA_GHMC_output_shape(self):
-        samples = sAIA(
+        samples = ATune(
             x_init=self.x_init,
             potential_args=self.potential_args,
             n_samples_tune=self.n_samples_tune,
@@ -75,7 +75,7 @@ class TestSAIA(unittest.TestCase):
     @HiddenPrints
     def test_invalid_stage_raises(self):
         with self.assertRaises(NotImplementedError):
-            sAIA(
+            ATune(
                 x_init=self.x_init,
                 potential_args=self.potential_args,
                 n_samples_tune=self.n_samples_tune,
@@ -92,7 +92,7 @@ class TestSAIA(unittest.TestCase):
     @HiddenPrints
     def test_invalid_sampler_raises(self):
         with self.assertRaises(NotImplementedError):
-            sAIA(
+            ATune(
                 x_init=self.x_init,
                 potential_args=self.potential_args,
                 n_samples_tune=self.n_samples_tune,
@@ -108,7 +108,7 @@ class TestSAIA(unittest.TestCase):
     
     @HiddenPrints
     def test_stage_3_HMC_shape(self):
-        samples = sAIA(
+        samples = ATune(
             x_init=self.x_init,
             potential_args=self.potential_args,
             n_samples_tune=self.n_samples_tune,
@@ -155,7 +155,7 @@ class TestSAIA(unittest.TestCase):
 
     @HiddenPrints
     def test_reproducibility(self):
-        samples_1 = sAIA(
+        samples_1 = ATune(
             x_init=self.x_init,
             potential_args=self.potential_args,
             n_samples_tune=5,
@@ -168,7 +168,7 @@ class TestSAIA(unittest.TestCase):
             stage=2,
             RNG_key=123
         )
-        samples_2 = sAIA(
+        samples_2 = ATune(
             x_init=self.x_init,
             potential_args=self.potential_args,
             n_samples_tune=5,

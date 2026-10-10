@@ -10,6 +10,7 @@ import numpy as np
 import math
 from scipy.linalg import solve_toeplitz
 from scipy.special import kv as modified_bessel_2
+from scipy.integrate import trapezoid
 
 
 def ar_fit(x, max_order=None):
@@ -91,7 +92,7 @@ def compute_aic(innovation_var, ar_order, n_obs):
 ### Cramer von Mises Statistic ###
 
 def is_stationarity(x, signif_level=.05):
-    return calculate_p_value(x) < signif_level
+    return calculate_p_value(x) >= signif_level
 
 
 def calculate_p_value(x, ess_chain_frac=.5):
@@ -113,7 +114,7 @@ def calculate_p_value(x, ess_chain_frac=.5):
 
 def cramer_von_mises_statistic(x, ess_chain_frac=.5):
     bb_stat = _brownian_bridge_statistic(x, 1 - ess_chain_frac)
-    cvm_stat = np.trapz(bb_stat ** 2, np.linspace(0, 1, len(bb_stat)))
+    cvm_stat = trapezoid(bb_stat ** 2, np.linspace(0, 1, len(bb_stat)))
     return cvm_stat
 
 
@@ -129,7 +130,7 @@ def _brownian_bridge_statistic(x, frac_discard=.5):
     """
     n_discard = math.ceil(frac_discard * len(x))
     x_subseq = x[n_discard:]
-    spectrum_at_zero = np.var(x_subseq) / estimate_ess(x_subseq, normed=True)
+    spectrum_at_zero = np.var(x_subseq) / ar_process_fit(x_subseq, axis=0, normed=True)[0]
     cumsum = np.concatenate(([0], np.cumsum(x)))
     linear_interp = np.arange(len(x) + 1) * np.mean(x)
     stat = (cumsum - linear_interp) / np.sqrt(len(x) * spectrum_at_zero)
@@ -228,7 +229,7 @@ def batch_means(samples, axis=0, normed=False, n_batch=25):
     n_sample = samples.shape[axis]
     if 2 * n_batch > n_sample:
         raise ValueError(
-            "The number of batches must be less than twice the number of samples."
+            "The number of batches must be at most half the number of samples."
         )
 
     batch_index = np.linspace(0, n_sample, n_batch + 1).astype('int')
@@ -236,7 +237,7 @@ def batch_means(samples, axis=0, normed=False, n_batch=25):
         np.take(samples, np.arange(batch_index[i], batch_index[i + 1]), axis)
         for i in range(n_batch)
     ]
-    batch_mean = np.stack((np.mean(batch, axis) for batch in batch_list), axis)
+    batch_mean = np.stack([np.mean(batch, axis) for batch in batch_list], axis)
     mcmc_var = n_sample / n_batch * np.var(batch_mean, axis)
     ess = np.var(samples, axis) / mcmc_var
     if not normed: ess *= n_sample
@@ -273,7 +274,6 @@ def monotone_sequence(
     n_sample = samples.shape[axis]
     ess = np.zeros(n_param)
     if n_sample <= 2: # Edge case.
-        ess.fill(n_sample)
         return ess, []
 
     auto_cor = []
