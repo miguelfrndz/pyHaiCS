@@ -6,7 +6,7 @@
 
 Introducing `pyHaiCS`, a Python library for Hamiltonian-based Monte-Carlo methods tailored towards practical applications in *computational statistics*. From sampling complex probability distributions, to approximating complex integrals — such as in the context of Bayesian inference — `pyHaiCS` is designed to be fast, flexible, and easy to use, with a focus on providing a user-friendly interface for researchers and practitioners while also offering users a variety of *advanced features*. 
 
-Our library currently implements a wide range of *sampling algorithms* — including single-chain and multi-chain Hamiltoninan Monte-Carlo (HMC) and Generalized HMC (GHMC); a variety of numerical schemes for the *integration* of the simulated Hamiltonian dynamics (including a generalized version of Multi-Stage Splitting integrators), or a novel *adaptive* algorithm — Adaptive Integration Approach in Computational Statistics (s-AIA) — for the automatic tuning of the parameters of both the numerical integrator and the sampler. 
+Our library currently implements a wide range of *sampling algorithms* — including single-chain and multi-chain Hamiltoninan Monte-Carlo (HMC) and Generalized HMC (GHMC); a variety of numerical schemes for the *integration* of the simulated Hamiltonian dynamics (including a generalized version of Multi-Stage Splitting integrators), or a novel *adaptive* algorithm — Adaptive Integration Approach in Computational Statistics (ATune) — for the automatic tuning of the parameters of both the numerical integrator and the sampler. 
 
 Likewise, several utilities for *diagnosing* the convergence and efficiency of the sampling process, as well as *multidisciplinary* benchmarks — ranging from simple toy problems such as sampling from specific distributions, to more complex real-world applications in the fields of computational biology, Bayesian modeling, or physics — are provided.
 
@@ -18,7 +18,7 @@ The main features of `pyHaiCS` include its:
 
 - **Integration with Existing Tools:** The library is designed to be *easily integrated* with other Python libraries, such as `NumPy`, `SciPy`, and `Scikit-Learn`. This allows users to leverage existing tools and workflows, and build on top of the rich ecosystem of scientific computing in Python. Therefore, users can easily incorporate `pyHaiCS` into their existing Machine Learning workflows, and use it for tasks such as inference, model selection, or parameter estimation in the context of Bayesian modeling.
 
-- **Advanced Features:** `pyHaiCS` supports a variety of Hamiltonian-inspired sampling algorithms, including single-chain and multi-chain HMC (and GHMC), generalized $k$-th stage Multi-Stage Splitting integrators, and adaptive integration schemes (such as s-AIA).
+- **Advanced Features:** `pyHaiCS` supports a variety of Hamiltonian-inspired sampling algorithms, including single-chain and multi-chain HMC (and GHMC), generalized $k$-th stage Multi-Stage Splitting integrators, and adaptive integration schemes (such as ATune).
 
 > [!NOTE] 
 > `pyHaiCS` is an open-source project and is actively maintained and developed by a team of researchers and practitioners in the field of computational statistics. We welcome contributions from the community, and encourage users to report issues, suggest new features, and contribute to the development of the library ;)
@@ -30,9 +30,9 @@ The main features of `pyHaiCS` include its:
 > - T. Radivojevic. Enhancing Sampling in Computational Statistics Using Modified Hamiltonians. PhD thesis, UPV/EHU, Bilbao (Spain), 2016. URI http://hdl.handle.net/20.500.11824/323
 
 ## General Features of `pyHaiCS`
-- `Samplers`: Contains Hamiltonian (and regular) MCMC samplers such as RWMH, HMC, GHMC.
+- `Samplers`: Contains Hamiltonian (and regular) MCMC samplers such as RWMH, HMC, GHMC, MHMC, RMHMC, Gibbs, Importance and Rejection sampling.
 - `Integrators`: A variety of numerical integration for Hamiltonian dynamics are currently implemented: Leapfrog-Verlet, 2-stage & 3-stage MSSIs, Velocity-Verlet, BCSS, ME, etc.
-- `Adaptive Tuning`: The s-AIA tuning scheme is implemented for automatically estimating the best integrator and sampler parameters.
+- `Adaptive Tuning`: The _ATune_ sampler automatically tunes the step size, the number of integration steps and the momentum noise, and selects the optimal coefficients of the multi stage integrator, based on the s-AIA scheme.
 - `Sampling Metrics`: A variety of metrics related to the quality of the sampling procedures.
 - `Multi-Disciplinary Benchmarks`: Benchmarks provided to evaluate the samplers including applications in computational biology, Bayesian modeling, and physics, as well as toy problems for testing and validation.
 
@@ -45,12 +45,27 @@ pip install $(curl -s https://pyhaics.github.io/latest.txt)
 
 Note that the above command will install the latest *official* version of `pyHaiCS` currently available on the GitHub releases page.
 
-## General API Overview (TO BE UPDATED)
-- `Analysis`: Contains analytical tools for sampling analysis.
-- `Config`: Contains configuration files for running `pyHaiCS`.
-- `Samplers`: Contains all the implemented samplers (see section below).
-- `Tests`: Test folder. Preferably, run the `run_tests.sh` instead of running each test individually. You might be required to give execution rights to the script using the following command: `chmod +x run_tests.sh`.
-- `Utils`: Contains general utilities used by `pyHaiCS`.
+## General API Overview
+- `pyHaiCS.samplers`: Contains all the implemented samplers, as top level functions
+    - `hamiltonian`: `HMC`, `GHMC`, `MHMC`, `RMHMC`, `MALA`, `L2MC`, `MDMC`, `SLDMC`.
+    - `adaptive`: `ATune` and `sMAIA` (MHMC counterpart of ATune)
+    - `basic_mcmc`: `RWMH` and `gibbs_sampling`
+    - `standard`: `rejection_sampling` and `importance_sampling`
+- `pyHaiCS.integrators`: Contains all the integrators, as subclasses of `Integrator` class.
+    - `VerletIntegrator`: Velocity Verlet, one stage.
+    - `MSSI_2`: 2-stages Multi Stage Splitting Integrators (`VV_2`, `BCSS_2`, `ME_2`)
+    - `MSSI_3`: 3-stages Multi Stage Splitting Integrators (`VV_3`, `BCSS_3`, `ME_3`)
+    - `sAIA_2`, `sAIA_3`: adaptive MSSI integrators, with optimal choice of coefficients
+    - `RMHMCVerletIntegrator`
+- `pyHaiCS.utils`
+    - `hamiltonian`: contains `MassMatrix`, `Hamiltonian`, `Modified Hamiltonian` and Fisher metrics.
+    - `metrics`: contains acceptance rate, ESS, PSRF, MCSE, IACT and `compute_metrics` which prints a summary table.
+    - `estimators` and `coda_utils`: estimators and helpers for the diagnostics and ESS metrics.
+- `pyHaiCS.analysis`: reserved for analysis tools, currently empty
+  
+Other folders in the repository:
+- `pyHaiCS/benchmarks`: datasets for the benchmark models (GD, BLR, BNN, PDE, epidemiological)
+- `pyHaiCS/tests`: unit tests (for running all of them, use `./run_tests.sh`)
 
 ## Instructions to Run the Talbot Docker Environment
 
@@ -86,10 +101,9 @@ docker rm talbot
 
 ## TODO: Pending Tasks
 
-* Improve Multi-Chain sampling (better parallelization)
-* Make integrators JIT-Compilable (Maybe using PyTrees or Partially-Static Compiling) -> As of right now, the code for the Verlet integrator does actually JIT-Compile, but it can be severely improved
+* Improve Multi-Chain sampling for the adaptive samplers.
 * Implement More Integrators
 * Implement More Samplers
-* Implement Adaptive Methods: s-AIA is implemented but limited to HMC/GHMC sampling and 2- & 3-stage splitting integrators
-* A performance issue related to s-AIA needs fixing: because in the production stage each iteration of HMC uses a different L, epsilon, and Phi (integrator), the pre-compiled JIT versions are not as efficient (massive compilation overhead each time).
-* Implement Geyer's Effective Sample Size using JAX and VMap so that the computation can be vectorized accross chains and paramters of the model.
+* Implement GRADe.
+* Add tests for numerical correctness.
+* Implement Adaptive Methods: ATune is implemented but limited to HMC/GHMC sampling and 2- & 3-stage splitting integrators

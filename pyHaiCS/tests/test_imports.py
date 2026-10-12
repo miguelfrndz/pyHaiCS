@@ -9,7 +9,7 @@ import pyHaiCS as haics
 class TestImports(unittest.TestCase):
 
     def test_version(self):
-        self.assertEqual(haics.__version__, "0.0.1")
+        self.assertEqual(haics.__version__, "0.1.0")
 
     def test_namespace(self):
         with self.assertRaises(AttributeError):

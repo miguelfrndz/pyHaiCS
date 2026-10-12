@@ -11,6 +11,6 @@ authors:
   given-names: "Aitor"
   orcid: "https://orcid.org/0000-0002-1585-4717"
 title: "pyHaiCS: Hamiltonian-based Monte-Carlo for Computational Statistics"
-version: 0.0.1
-date-released: 2025-02-20
+version: 0.1.0
+date-released: 2026-10-12
 url: "https://github.com/miguelfrndz/pyHaiCS"
